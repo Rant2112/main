@@ -1,0 +1,4 @@
+vnckill(){
+	vncserver -kill :$1
+}
+alias g="git"
