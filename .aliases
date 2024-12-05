@@ -1,4 +1,23 @@
+# Personal
+
 vnckill(){
 	vncserver -kill :$1
 }
 alias g="git"
+alias ls="ls --color=auto"
+alias ll="ls -la"
+alias lld="ls -lad"
+alias llt="ls -latr"
+e(){
+	emacs $@ &
+}
+xt(){
+	xterm $@ &
+}
+alias gr="git rev-parse --show-toplevel"
+alias h="history 20"
+alias l="less -i "
+mcd(){
+	mkdir -pv $1 && cd $1
+}
+alias clean="rm -fv {,.}{*~,#*#}"
