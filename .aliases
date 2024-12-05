@@ -21,3 +21,4 @@ mcd(){
 	mkdir -pv $1 && cd $1
 }
 alias clean="rm -fv {,.}{*~,#*#}"
+alias myxrdb="xrdb -cpp cpp -load ~/.Xresources"
