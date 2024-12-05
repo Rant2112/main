@@ -18,3 +18,4 @@
  )
 
 (load-theme 'solarized t)
+(set-frame-font "Hack 12" nil t)
