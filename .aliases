@@ -22,3 +22,4 @@ mcd(){
 }
 alias clean="rm -fv {,.}{*~,#*#}"
 alias myxrdb="xrdb -cpp cpp -load ~/.Xresources"
+alias j="jobs -l"
