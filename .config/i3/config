@@ -142,3 +142,5 @@ bindsym $mod+r mode "resize"
 bar {
     font pango:monospace 12
 }
+
+default_border normal 6
