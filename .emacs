@@ -23,3 +23,4 @@
 (tool-bar-mode -1)
 (setq inhibit-startup-message t)
 (setq initial-scratch-message nil)
+(setq split-width-threshold 1 )
