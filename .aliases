@@ -23,3 +23,9 @@ mcd(){
 alias clean="rm -fv {,.}{*~,#*#}"
 alias myxrdb="xrdb -cpp cpp -load ~/.Xresources"
 alias j="jobs -l"
+wta(){
+	git worktree add -b $1 $1 $2 && cd $1
+}
+relabel(){
+	echo -ne "\033]0;$@\007"
+}
