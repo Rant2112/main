@@ -27,5 +27,21 @@ wta(){
 	git worktree add -b $1 $1 $2 && cd $1
 }
 relabel(){
+	export LABEL="$@"
 	echo -ne "\033]0;$@\007"
+}
+rps(){
+	git rev-parse --short=4 $1
+}
+alias isgit="git rev-parse --is-inside-work-tree >& /dev/null"
+newname(){
+	local NUM=0
+	local FILE=$1
+	if [ -e "$1" ]; then
+		while [ -e "${1}.$NUM" ]; do
+			((NUM++))
+		done
+		FILE=${1}.$NUM
+	fi
+	echo $FILE
 }
