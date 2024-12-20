@@ -45,3 +45,4 @@ newname(){
 	fi
 	echo $FILE
 }
+alias xc="xclip -o"
