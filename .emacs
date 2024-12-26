@@ -24,3 +24,4 @@
 (setq inhibit-startup-message t)
 (setq initial-scratch-message nil)
 (setq split-width-threshold 1 )
+(global-set-key (kbd "M-g") `goto-line)
