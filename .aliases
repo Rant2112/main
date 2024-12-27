@@ -34,6 +34,7 @@ rps(){
 	git rev-parse --short=4 $1
 }
 alias isgit="git rev-parse --is-inside-work-tree >& /dev/null"
+alias gfp="git fetch --prune"
 newname(){
 	local NUM=0
 	local FILE=$1
