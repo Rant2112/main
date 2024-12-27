@@ -36,6 +36,7 @@ rps(){
 }
 alias isgit="git rev-parse --is-inside-work-tree >& /dev/null"
 alias gfp="git fetch --prune"
+alias gdn="git diff --name-only "
 newname(){
 	local NUM=0
 	local FILE=$1
