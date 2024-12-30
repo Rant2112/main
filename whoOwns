@@ -1,0 +1,47 @@
+#!/usr/bin/bash
+
+# TODO :
+# Add a separate file for git-things to ignore.
+
+if [ $# -eq 0 ]; then
+    echo "requires a filename / directory argument"
+    exit 1
+fi
+
+AUTHOR="None"
+AUTH="Author: "
+declare -A COUNT
+COMM="//"
+
+while IFS= read -r LINE; do
+    #echo $LINE
+    if [[ $LINE == $AUTH* ]]; then
+        #echo $LINE
+        AUTHOR=${LINE#$AUTH}
+#        echo $AUTHOR
+    fi
+    LINE=${LINE%%${COMM}*}
+    if [[ $LINE == *';'* ]]; then
+ #       echo $LINE
+        ((COUNT["$AUTHOR"]++))
+  #      echo $AUTHOR
+   #     echo ${COUNT["$AUTHOR"]}
+    #    echo ${!COUNT[@]}
+     #   echo ---
+    fi
+done < <(git log -p --no-merges -- $@)
+
+#echo
+#echo "Done:"
+MAXLEN=0
+for AUTHOR in "${!COUNT[@]}"; do
+    LEN=${#COUNT["$AUTHOR"]}
+    if [ "$LEN" -gt "$MAXLEN" ]; then
+        MAXLEN=$LEN
+    fi
+done
+#echo "MAXLEN " $MAXLEN
+for AUTHOR in "${!COUNT[@]}"; do
+    printf "%${MAXLEN}d" ${COUNT["$AUTHOR"]}
+    echo " $AUTHOR"
+done
