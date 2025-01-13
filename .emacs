@@ -6,7 +6,9 @@
  ;; Your init file should contain only one such instance.
  ;; If there is more than one, they won't work right.
  '(custom-theme-load-path (quote (custom-theme-directory t "/home/mattday/.emacs.d/emacs-color-theme-solarized-master")))
- '(diff-switches "-u"))
+ '(diff-switches "-u")
+ '(indent-tabs-mode nil)
+ '(tab-width 3))
 
 ;;; uncomment for CJK utf-8 support for non-Asian users
 ;; (require 'un-define)
@@ -25,3 +27,4 @@
 (setq initial-scratch-message nil)
 (setq split-width-threshold 1 )
 (global-set-key (kbd "M-g") `goto-line)
+(setq indent-line-function `insert-tab)
