@@ -52,3 +52,5 @@ newname(){
 alias xc="xclip -o"
 alias sp="for f in {1..5} ; do echo ; done"
 alias gdno="git diff --name-only "
+alias cdrp='cd `realpath $PWD`'
+alias mdps='ps -eo pid,ppid,etime,user,cmd '
