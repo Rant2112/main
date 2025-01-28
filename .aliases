@@ -5,9 +5,9 @@ vnckill(){
 }
 alias g="git"
 alias ls="ls --color=auto"
-alias ll="ls -la"
-alias lld="ls -lad"
-alias llt="ls -latr"
+alias ll="ls -lha"
+alias lld="ls -lhad"
+alias llt="ls -lhatr"
 e(){
 	emacs $@ &
 }
