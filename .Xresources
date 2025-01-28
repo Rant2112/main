@@ -53,8 +53,11 @@
 
 !! green dark/light
 !! highlight color
-!! was S_green but that does not contrast enough with S_base0
-*color2:                #002000
+!! was S_green but that does not contrast enough with S_base0 (this is the ncdu highlight color)
+!! This is the +.... color for git diff.  So, it wants to contrast with:
+!!    term background S_base03
+!!    ncdu text foreground color12, color11, color7
+*color2:                #356900
 *color10:               S_base01
 
 !! yellow dark/light
