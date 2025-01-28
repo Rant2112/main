@@ -9,13 +9,6 @@
 #define S_base2         #eee8d5
 #define S_base3         #fdf6e3
 
-*background:             S_base03
-*foreground:             S_base0
-*fadeColor:              S_base03
-*cursorColor:            S_base1
-*pointerColorBackground: S_base01
-*pointerColorForeground: S_base1
-
 #define S_yellow        #b58900
 #define S_orange        #cb4b16
 #define S_red           #dc322f
@@ -24,6 +17,31 @@
 #define S_blue          #268bd2
 #define S_cyan          #2aa198
 #define S_green         #859900
+
+!! ncdu does not use these
+*background:             S_base03
+*foreground:             S_base0
+*fadeColor:              S_base03
+*cursorColor:            S_base1
+*pointerColorBackground: S_base01
+*pointerColorForeground: S_base1
+*highlightColor        : S_yellow
+*highlightTextColor    : #000000
+
+!! ncdu
+!!    general
+!!       background color0 - good, normal xt background
+!!       light text color12 - light grey
+!!       numbers color11    - light grey
+!!       foreground bold color7 - whiteish
+!!    details
+!!       size graph color5
+!!       header / footer background color6
+!!       total disk use text color8 (on footer)
+!!    highlight
+!!       highlight background color2
+!!       highlighted bold text color15
+!!       foreground looks to stay the same when highlighted
 
 !! black dark/light
 *color0:                S_base02
@@ -34,10 +52,13 @@
 *color9:                S_orange
 
 !! green dark/light
-*color2:                S_green
+!! highlight color
+!! was S_green but that does not contrast enough with S_base0
+*color2:                #002000
 *color10:               S_base01
 
 !! yellow dark/light
+!! prompt directory name foreground
 *color3:                S_yellow
 *color11:               S_base00
 
