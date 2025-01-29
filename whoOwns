@@ -3,6 +3,8 @@
 # TODO :
 # Add a separate file for git-things to ignore.
 
+#set -x
+
 if [ $# -eq 0 ]; then
     echo "requires a filename / directory argument"
     exit 1
@@ -20,14 +22,15 @@ while IFS= read -r LINE; do
         AUTHOR=${LINE#$AUTH}
 #        echo $AUTHOR
     fi
-    LINE=${LINE%%${COMM}*}
-    if [[ $LINE == *';'* ]]; then
- #       echo $LINE
+#    LINE=${LINE%%${COMM}*}
+#    if [[ $LINE == *';'* ]]; then
+    if [[ $LINE =~ ^[+-][^-+] ]] ; then
+#        echo $LINE
         ((COUNT["$AUTHOR"]++))
-  #      echo $AUTHOR
-   #     echo ${COUNT["$AUTHOR"]}
-    #    echo ${!COUNT[@]}
-     #   echo ---
+#        echo $AUTHOR
+#        echo ${COUNT["$AUTHOR"]}
+#        echo ${!COUNT[@]}
+#        echo ---
     fi
 done < <(git log -p --no-merges -- $@)
 
