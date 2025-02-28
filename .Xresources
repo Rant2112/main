@@ -57,7 +57,8 @@
 !! This is the +.... color for git diff.  So, it wants to contrast with:
 !!    term background S_base03
 !!    ncdu text foreground color12, color11, color7
-*color2:                #356900
+!!*color2:                #356900
+*color2:                S_green
 *color10:               S_base01
 
 !! yellow dark/light
