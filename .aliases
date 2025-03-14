@@ -12,7 +12,8 @@ e(){
 	emacs $@ &
 }
 xt(){
-	xterm $@ &
+    local name=${1:-xterm}
+    LABEL=$name xterm -T "$name" -n "$name" &
 }
 alias gr="git rev-parse --show-toplevel"
 alias h="history 20"
