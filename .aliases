@@ -76,3 +76,6 @@ awkp(){
         }' "$file"
     done
 }
+
+alias wat="watch -n 60 "
+alias pstree="pstree -lpas "
