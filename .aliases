@@ -79,3 +79,4 @@ awkp(){
 
 alias wat="watch -n 60 "
 alias pstree="pstree -lpas "
+alias nows="sed -i 's/[[:space:]]\+$//' "
