@@ -81,4 +81,14 @@ awkp(){
 
 alias wat="watch -n 60 "
 alias pstree="pstree -lpas "
+
+pstreefull(){
+    mdps | head -1
+    for f in $(pstree $1 | cut -d ',' -f 2 | cut -d ' ' -f 1); do
+        mdps | grep "^\s*\b$f\b"
+    done
+}
+
 alias nows="sed -i 's/[[:space:]]\+$//' "
+# -L follows links
+alias latest='find -L . -type f -printf "%T@ %p\n" 2>/dev/null | sort -nr | head -n 30  | while read ts file; do echo "$(date -d @"$ts" "+%Y-%m-%d %H:%M:%S") $file"; done'
