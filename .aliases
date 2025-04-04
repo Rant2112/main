@@ -62,6 +62,8 @@ awkp(){
     pattern="$1"
     shift
 
+    matched=0
+
     for file in "$@"; do
         if [[ ! -f "$file" ]]; then
             #echo "Skipping: $file (not a regular file)" >&2
@@ -72,11 +74,13 @@ awkp(){
         BEGIN {RS=""; FS="\n"}  # Paragraph mode
         {
             if ($0 ~ pat) {
+                matched=1
                 print "==> " file " <=="
                 print $0 "\n"
             }
         }' "$file"
     done
+    return $((matched == 1 ? 0 : 1))
 }
 
 alias wat="watch -n 60 "
