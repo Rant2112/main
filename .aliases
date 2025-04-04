@@ -1,5 +1,7 @@
 # Personal
 
+#echo "personal aliases"
+
 vnckill(){
 	vncserver -kill :$1
 }
