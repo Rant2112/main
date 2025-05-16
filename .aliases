@@ -96,3 +96,4 @@ pstreefull(){
 alias nows="sed -i 's/[[:space:]]\+$//' "
 # -L follows links
 alias latest='find -L . -type f -printf "%T@ %p\n" 2>/dev/null | sort -nr | head -n 30  | while read ts file; do echo "$(date -d @"$ts" "+%Y-%m-%d %H:%M:%S") $file"; done'
+alias tmn='tmux new-session -s '
