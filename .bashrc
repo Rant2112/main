@@ -29,11 +29,8 @@ __prompt_command(){
     fi
     PS1_PWD=$(printf " %25s" ${PWD25})
 
-    # Preserve history and share across sessions
-    # (a)ppend current command to history
-    # (c)lear current history - prevents local dupes
-    # (r)load history from file
-    history -a; history -c; history -r
+    # (a)ppend current command to history so it is available to the 'history' command in other sessions
+    history -a
 
     # Setting PS1 each time is the only way I could get the colors and the escaped color widths to work (so word wrap works a the correct column).
     PS1="\h ${COLOR_YELLOW}${PS1_PWD}${COLOR_DEFAULT} \! ${PS1_EC_COLOR}${PS1_EC}${COLOR_DEFAULT} $ "
