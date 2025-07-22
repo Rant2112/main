@@ -29,6 +29,13 @@ alias j="jobs -l"
 wta(){
 	git worktree add -b $1 $1 $2 && cd $1
 }
+wtao(){
+    if [ "$#" -ne 1 ]; then
+        echo "Usage: wtao <branch>" >&2
+        return 1
+    fi
+    wta $1 origin/$1
+}
 relabel(){
 	export LABEL="$@"
 	echo -ne "\033]0;$@\007"
