@@ -15,32 +15,12 @@ from datetime import datetime, timedelta
 class TemporalAnalyzer:
     def __init__(self):
         self.commands = []
-        self.single_commands = Counter()
-        self.multi_word_commands = Counter()
+        self.all_commands = Counter()  # Unified tracking for all command patterns
         self.command_dates = defaultdict(set)  # command -> set of dates
         self.valid_commands = set()
         self.invalid_commands = set()
         self.skipped_count = 0
         self.skip_reasons = Counter()
-        
-        # Heuristics for filtering out accidental pastes
-        self.suspicious_patterns = [
-            r'^[A-Z][a-z]+ [a-z]+',  # "Parsing design", "Back to"
-            r'^[A-Z][a-zA-Z]+ [a-z]+ [a-z]+',  # "Parsing design file"
-            r'^[A-Z]+[a-z]*$',  # Single capitalized words that look like text
-            r'.*[A-Z]{3,}.*',  # Commands with 3+ consecutive capitals (likely encoded strings)
-            r'.*[+/=]{3,}.*',  # Base64-like strings
-            r'.*\$\([A-Za-z]{2,}\)$',  # Suspicious function calls like $(bz)
-        ]
-        
-        # Known good command patterns
-        self.known_good_patterns = [
-            r'^[A-Z]+$',  # Single uppercase letters (like custom aliases)
-            r'^[a-z]',    # Normal lowercase commands
-            r'^\.',       # dotfiles/hidden commands
-            r'^\/',       # Absolute paths
-            r'^\~',       # Home directory paths
-        ]
         
     def parse_timestamp(self, line):
         """Extract timestamp from bash history line"""
@@ -51,28 +31,7 @@ class TemporalAnalyzer:
             return datetime.fromtimestamp(timestamp).date()
         return None
     
-    def is_suspicious_paste(self, cmd_line):
-        """Use heuristics to detect accidental pastes"""
-        for pattern in self.suspicious_patterns:
-            if re.match(pattern, cmd_line):
-                return True
-                
-        for pattern in self.known_good_patterns:
-            if re.match(pattern, cmd_line):
-                return False
-        
-        words = cmd_line.split()
-        if len(words) > 0:
-            first_word = words[0]
-            
-            if len(first_word) > 15 and not first_word.startswith('/'):
-                return True
-                
-            if len(first_word) > 3 and first_word[0].isupper() and any(c.islower() for c in first_word[1:]):
-                if len(first_word) > 6:
-                    return True
-        
-        return False
+
         
     def is_valid_command(self, cmd_word):
         """Check if a command word is a valid executable using 'type' command"""
@@ -155,7 +114,7 @@ class TemporalAnalyzer:
     
     def analyze_commands(self, command_entries, min_non_adjacent_days=5):
         """Analyze commands with temporal filtering"""
-        print("Analyzing commands with temporal and smart filtering...")
+        print("Analyzing commands with temporal filtering...")
         
         for i, (cmd, date) in enumerate(command_entries):
             if i % 1000 == 0:
@@ -167,12 +126,6 @@ class TemporalAnalyzer:
                 
             parts = cleaned.split()
             if not parts:
-                continue
-            
-            # Apply smart filtering
-            if self.is_suspicious_paste(cleaned):
-                self.skipped_count += 1
-                self.skip_reasons['suspicious_paste'] += 1
                 continue
             
             first_word = parts[0]
@@ -192,25 +145,24 @@ class TemporalAnalyzer:
                 self.skip_reasons['too_long'] += 1
                 continue
                 
-            # Track dates for temporal analysis
-            if date:
-                self.command_dates[cleaned].add(date)
-                self.command_dates[first_word].add(date)
-                
-                # Track multi-word patterns
-                for length in range(2, min(6, len(parts) + 1)):
-                    pattern = ' '.join(parts[:length])
-                    self.command_dates[pattern].add(date)
+            # Track all patterns: full command, first word, and multi-word patterns
+            patterns_to_track = [cleaned, first_word]  # Full command and root command
             
-            # Add to main analysis
-            self.commands.append(cleaned)
-            self.single_commands[first_word] += 1
-            
+            # Add multi-word patterns (2-word, 3-word, etc.)
             for length in range(2, min(6, len(parts) + 1)):
                 pattern = ' '.join(parts[:length])
-                self.multi_word_commands[pattern] += 1
+                patterns_to_track.append(pattern)
+            
+            # Track dates and counts for all patterns
+            for pattern in patterns_to_track:
+                if date:
+                    self.command_dates[pattern].add(date)
+                self.all_commands[pattern] += 1
+            
+            # Keep original commands list for reference
+            self.commands.append(cleaned)
         
-        print(f"Temporal filtering complete. Skipped {self.skipped_count} problematic commands.")
+        print(f"Initial filtering complete. Skipped {self.skipped_count} invalid commands.")
         
         # Now filter by temporal criteria
         print(f"Applying temporal filter: minimum {min_non_adjacent_days} non-adjacent days...")
@@ -218,74 +170,137 @@ class TemporalAnalyzer:
     
     def filter_by_temporal_usage(self, min_non_adjacent_days):
         """Filter commands by non-adjacent day usage"""
-        # Filter single commands
-        temporal_single_commands = Counter()
-        for cmd, count in self.single_commands.items():
+        # Filter all commands uniformly
+        temporal_commands = Counter()
+        for cmd, count in self.all_commands.items():
             non_adjacent_days = self.count_non_adjacent_days(self.command_dates[cmd])
             if non_adjacent_days >= min_non_adjacent_days:
-                temporal_single_commands[cmd] = count
+                temporal_commands[cmd] = count
         
-        # Filter multi-word commands
-        temporal_multi_word_commands = Counter()
-        for cmd, count in self.multi_word_commands.items():
-            non_adjacent_days = self.count_non_adjacent_days(self.command_dates[cmd])
-            if non_adjacent_days >= min_non_adjacent_days:
-                temporal_multi_word_commands[cmd] = count
+        # Calculate filtering statistics
+        original_count = len(self.all_commands)
+        filtered_count = original_count - len(temporal_commands)
         
-        # Update counters
-        original_single = len(self.single_commands)
-        original_multi = len(self.multi_word_commands)
+        # Update to filtered commands
+        self.all_commands = temporal_commands
         
-        self.single_commands = temporal_single_commands
-        self.multi_word_commands = temporal_multi_word_commands
-        
-        filtered_single = original_single - len(self.single_commands)
-        filtered_multi = original_multi - len(self.multi_word_commands)
-        
-        print(f"Temporal filtering removed {filtered_single} single commands and {filtered_multi} multi-word patterns")
+        print(f"Temporal filtering removed {filtered_count} command patterns")
         print(f"(kept only commands used on {min_non_adjacent_days}+ non-adjacent days)")
     
+    def analyze_root_commands(self):
+        """Analyze commands by root to decide optimal aliasing strategy"""
+        # Group commands by their root (first word)
+        root_groups = defaultdict(list)
+        
+        for cmd, count in self.all_commands.items():
+            if ' ' in cmd:  # Multi-word command
+                root = cmd.split()[0]
+                root_groups[root].append({
+                    'command': cmd,
+                    'count': count,
+                    'savings_potential': (len(cmd) - 2) * count  # Assume 2-char alias
+                })
+        
+        # Analyze each root group
+        alias_recommendations = []
+        
+        for root, commands in root_groups.items():
+            if not commands:
+                continue
+                
+            # Calculate total usage of root vs individual patterns
+            total_pattern_usage = sum(cmd['count'] for cmd in commands)
+            root_usage = self.all_commands.get(root, 0)
+            
+            # Calculate potential savings for each approach
+            # Option 1: Alias the root command
+            if root_usage > 0:
+                root_alias_savings = (len(root) - 1) * (root_usage + total_pattern_usage)
+            else:
+                root_alias_savings = 0
+            
+            # Option 2: Alias individual patterns
+            pattern_alias_savings = sum(cmd['savings_potential'] for cmd in commands)
+            
+            # Decision logic
+            if root_alias_savings > pattern_alias_savings * 1.2:  # 20% bonus for simplicity
+                # Recommend aliasing the root
+                if root_usage + total_pattern_usage >= 5:  # Minimum usage threshold
+                    alias_recommendations.append({
+                        'type': 'root',
+                        'original': root,
+                        'alias': root[0],  # Single letter alias
+                        'count': root_usage + total_pattern_usage,
+                        'savings': root_alias_savings,
+                        'patterns': [cmd['command'] for cmd in commands]
+                    })
+            else:
+                # Recommend individual pattern aliases
+                for cmd in commands:
+                    if cmd['count'] >= 3:  # Minimum usage threshold
+                        alias_recommendations.append({
+                            'type': 'pattern',
+                            'original': cmd['command'],
+                            'alias': self.generate_alias(cmd['command']),
+                            'count': cmd['count'],
+                            'savings': cmd['savings_potential'],
+                            'patterns': [cmd['command']]
+                        })
+        
+        return alias_recommendations
+    
+    def generate_alias(self, command):
+        """Generate a short alias for a command"""
+        parts = command.split()
+        
+        if len(parts) == 2:
+            return parts[0][0] + parts[1][0]
+        elif parts[0] in ['git', 'g', 'docker', 'npm', 'pip']:
+            return parts[0][0] + ''.join(p[0] for p in parts[1:3])
+        else:
+            return ''.join(p[0] for p in parts[:3])
+    
     def calculate_temporal_savings(self):
-        """Calculate savings for temporally recurring commands"""
+        """Calculate savings for temporally recurring commands using smart alias logic"""
         print("=" * 80)
-        print("TEMPORAL SAVINGS ANALYSIS (Recurring Commands Only)")
+        print("TEMPORAL SAVINGS ANALYSIS (Smart Aliasing)")
         print("=" * 80)
+        
+        # Get smart alias recommendations
+        alias_recommendations = self.analyze_root_commands()
+        
+        # Sort by savings potential
+        alias_recommendations.sort(key=lambda x: x['savings'], reverse=True)
         
         total_chars_saved = 0
         total_commands_affected = 0
         savings_data = []
         
-        for cmd, count in self.multi_word_commands.most_common(25):
-            if count >= 3 and len(cmd.split()) >= 2:
-                parts = cmd.split()
+        for rec in alias_recommendations[:25]:  # Top 25 recommendations
+            cmd = rec['original']
+            alias_name = rec['alias']
+            count = rec['count']
+            
+            # Calculate actual savings
+            original_length = len(cmd)
+            alias_length = len(alias_name)
+            chars_saved_per_use = original_length - alias_length
+            total_chars_saved_cmd = chars_saved_per_use * count
+            
+            # Get temporal info
+            dates = self.command_dates[cmd]
+            non_adjacent_days = self.count_non_adjacent_days(dates)
+            date_span = max(dates) - min(dates) if dates else timedelta(0)
+            
+            if chars_saved_per_use > 0:
+                total_chars_saved += total_chars_saved_cmd
+                total_commands_affected += count
                 
-                # Generate alias name
-                if len(parts) == 2:
-                    alias_name = parts[0][0] + parts[1][0]
-                elif parts[0] in ['git', 'g', 'docker', 'npm', 'pip']:
-                    alias_name = parts[0][0] + ''.join(p[0] for p in parts[1:3])
-                else:
-                    alias_name = ''.join(p[0] for p in parts[:3])
-                
-                # Calculate savings
-                original_length = len(cmd)
-                alias_length = len(alias_name)
-                chars_saved_per_use = original_length - alias_length
-                total_chars_saved_cmd = chars_saved_per_use * count
-                
-                # Get temporal info
-                dates = self.command_dates[cmd]
-                non_adjacent_days = self.count_non_adjacent_days(dates)
-                date_span = max(dates) - min(dates) if dates else timedelta(0)
-                
-                if chars_saved_per_use > 0:
-                    total_chars_saved += total_chars_saved_cmd
-                    total_commands_affected += count
-                    
-                    savings_data.append({
-                        'original': cmd,
-                        'alias': alias_name,
-                        'count': count,
+                savings_data.append({
+                    'original': cmd,
+                    'alias': alias_name,
+                    'count': count,
+                    'type': rec['type'],
                         'chars_per_use': chars_saved_per_use,
                         'total_chars': total_chars_saved_cmd,
                         'non_adjacent_days': non_adjacent_days,
@@ -296,14 +311,15 @@ class TemporalAnalyzer:
         # Sort by total character savings
         savings_data.sort(key=lambda x: x['total_chars'], reverse=True)
         
-        print(f"TEMPORAL ALIAS SUGGESTIONS (Recurring Patterns):")
-        print("-" * 90)
-        print(f"{'Rank':<4} {'Original Command':<30} {'Alias':<8} {'Uses':<6} {'Days':<6} {'Span':<8} {'Savings':<15}")
-        print("-" * 90)
+        print(f"SMART ALIAS SUGGESTIONS (Root vs Pattern Analysis):")
+        print("-" * 95)
+        print(f"{'Rank':<4} {'Original Command':<30} {'Alias':<8} {'Type':<8} {'Uses':<6} {'Days':<6} {'Span':<8} {'Savings':<15}")
+        print("-" * 95)
         
         for i, data in enumerate(savings_data[:20], 1):
+            alias_type = data.get('type', 'pattern')[:7]  # Truncate to fit
             print(f"{i:3d}. {data['original']:<30} {data['alias']:<8} "
-                  f"{data['count']:4d}x  {data['non_adjacent_days']:4d}d  {data['date_span']:6d}d  "
+                  f"{alias_type:<8} {data['count']:4d}x  {data['non_adjacent_days']:4d}d  {data['date_span']:6d}d  "
                   f"{data['chars_per_use']:2d}×{data['count']} = {data['total_chars']:4d} chars")
         
         print(f"\nTEMPORAL SAVINGS SUMMARY:")
@@ -349,14 +365,18 @@ class TemporalAnalyzer:
         print()
     
     def show_top_recurring_commands(self):
-        """Show top recurring commands with temporal info"""
+        """Show top recurring single-word commands with temporal info"""
         print("TOP 15 RECURRING COMMANDS (Multi-Day Usage):")
         print("-" * 60)
         print(f"{'Rank':<4} {'Command':<20} {'Uses':<6} {'Days':<6} {'Span':<8}")
         print("-" * 60)
         
+        # Filter to single-word commands only for this display
+        single_word_commands = {cmd: count for cmd, count in self.all_commands.items() 
+                               if ' ' not in cmd}
+        
         total_commands = len(self.commands)
-        for i, (cmd, count) in enumerate(self.single_commands.most_common(15), 1):
+        for i, (cmd, count) in enumerate(Counter(single_word_commands).most_common(15), 1):
             dates = self.command_dates[cmd]
             non_adjacent_days = self.count_non_adjacent_days(dates)
             date_span = (max(dates) - min(dates)).days if dates else 0
