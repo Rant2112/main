@@ -249,6 +249,193 @@ class TemporalAnalyzer:
         
         return alias_recommendations
     
+    def analyze_environment_variables(self):
+        """Analyze commands for frequently used strings that could be environment variables"""
+        # Extract any repeated string patterns from all commands
+        string_usage = defaultdict(list)  # string -> list of (command, count) tuples
+        
+        for cmd, count in self.all_commands.items():
+            # Look for various repeatable string patterns
+            patterns_to_check = [
+                # Git branch/remote patterns
+                r'origin/[\w/.-]+',
+                r'upstream/[\w/.-]+',
+                # Paths (absolute and relative)
+                r'/[\w/.-]{6,}',
+                r'[\w.-]+/[\w/.-]{6,}',
+                # URLs and network patterns
+                r'https?://[\w/.-]+',
+                r'[\w.-]+\.[\w.-]+/[\w/.-]+',
+                r'[\w.-]+:\d+',  # host:port
+                # File extensions and patterns
+                r'--[\w-]+=[\w/.-]{4,}',  # --flag=value
+                r'--[\w-]{4,}',  # --long-flag
+                r'-[\w]{2,}',  # multi-char flags like -la, -rf
+                # Version/hash patterns
+                r'v\d+\.\d+[\w.-]*',  # version numbers
+                r'[a-f0-9]{8,}',  # hex strings (commit hashes, etc.)
+                # File patterns
+                r'[\w.-]+\.[\w]{2,4}',  # file.extension
+                # Command sequences
+                r'[\w.-]{4,}',  # any word-like string 4+ chars
+            ]
+            
+            for pattern in patterns_to_check:
+                matches = re.findall(pattern, cmd)
+                for match in matches:
+                    # Filter criteria for environment variable candidates
+                    if (len(match) >= 4 and  # Minimum length
+                        not match.isdigit() and  # Not just a number
+                        not re.match(r'^-[a-zA-Z]$', match) and  # Not single letter flags
+                        not match in ['true', 'false', 'null', 'none'] and  # Not common values
+                        len(set(match)) > 2):  # Has some variety in characters
+                        string_usage[match].append((cmd, count))
+        
+        # Analyze string usage frequency
+        env_var_candidates = []
+        
+        for string_pattern, usages in string_usage.items():
+            # Calculate total usage across all commands
+            total_usage = sum(count for _, count in usages)
+            command_count = len(usages)
+            
+            # Adjust thresholds based on string type and length
+            min_usage = max(5, 20 - len(string_pattern))  # Longer strings need fewer uses
+            min_commands = 2 if len(string_pattern) > 10 else 3
+            
+            # Only suggest if used frequently enough
+            if total_usage >= min_usage and command_count >= min_commands:
+                # Generate environment variable name
+                env_name = self.generate_env_var_name(string_pattern)
+                
+                # Calculate potential savings
+                # Each usage saves (len(string) - len($ENV_NAME))
+                var_ref_length = len(f"${env_name}")
+                chars_saved_per_use = len(string_pattern) - var_ref_length
+                
+                if chars_saved_per_use > 0:
+                    total_chars_saved = chars_saved_per_use * total_usage
+                    
+                    # Get temporal info for the string
+                    all_dates = set()
+                    for cmd, _ in usages:
+                        all_dates.update(self.command_dates.get(cmd, set()))
+                    
+                    non_adjacent_days = self.count_non_adjacent_days(all_dates)
+                    date_span = max(all_dates) - min(all_dates) if all_dates else timedelta(0)
+                    
+                    env_var_candidates.append({
+                        'string': string_pattern,
+                        'env_name': env_name,
+                        'total_usage': total_usage,
+                        'command_count': command_count,
+                        'commands': [cmd for cmd, _ in usages],
+                        'chars_per_use': chars_saved_per_use,
+                        'total_chars_saved': total_chars_saved,
+                        'non_adjacent_days': non_adjacent_days,
+                        'date_span': date_span.days if all_dates else 0,
+                        'string_type': self.classify_string_type(string_pattern)
+                    })
+        
+        # Sort by total savings potential
+        env_var_candidates.sort(key=lambda x: x['total_chars_saved'], reverse=True)
+        
+        return env_var_candidates
+    
+    def classify_string_type(self, string_pattern):
+        """Classify the type of string for better categorization"""
+        if re.match(r'^https?://', string_pattern):
+            return 'URL'
+        elif re.match(r'^/', string_pattern):
+            return 'Path'
+        elif re.match(r'[\w.-]+/[\w/.-]+', string_pattern):
+            return 'Path/Branch'
+        elif re.match(r'--[\w-]+', string_pattern):
+            return 'Flag'
+        elif re.match(r'[\w.-]+:\d+', string_pattern):
+            return 'Host:Port'
+        elif re.match(r'[a-f0-9]{8,}', string_pattern):
+            return 'Hash'
+        elif re.match(r'v\d+\.\d+', string_pattern):
+            return 'Version'
+        elif re.match(r'[\w.-]+\.[\w]{2,4}$', string_pattern):
+            return 'File'
+        else:
+            return 'String'
+    
+    def generate_env_var_name(self, string_pattern):
+        """Generate a meaningful environment variable name for any string pattern"""
+        clean_string = string_pattern
+        
+        # Handle different string types
+        if re.match(r'^https?://', string_pattern):
+            # URL handling
+            clean_string = re.sub(r'^https?://', '', clean_string)
+            clean_string = re.sub(r'/.*$', '', clean_string)  # Keep just hostname
+            prefix = "URL"
+        elif re.match(r'^--[\w-]+', string_pattern):
+            # Flag handling
+            clean_string = re.sub(r'^--', '', string_pattern)
+            prefix = "FLAG"
+        elif re.match(r'^origin/', string_pattern):
+            # Git branch/remote
+            clean_string = re.sub(r'^origin/', '', string_pattern)
+            prefix = "BRANCH"
+        elif re.match(r'^/', string_pattern):
+            # Absolute path
+            clean_string = re.sub(r'^/proj_risc/user_dev/[\w]+/', '', clean_string)
+            clean_string = re.sub(r'^/home/[\w]+/', '', clean_string)
+            clean_string = re.sub(r'^/', '', clean_string)
+            prefix = ""
+        elif re.match(r'[\w.-]+:\d+', string_pattern):
+            # Host:port
+            clean_string = re.sub(r':\d+$', '', string_pattern)
+            prefix = "HOST"
+        elif re.match(r'[a-f0-9]{8,}', string_pattern):
+            # Hash/commit
+            return "COMMIT_HASH"
+        elif re.match(r'v\d+\.\d+', string_pattern):
+            # Version
+            return "VERSION"
+        else:
+            prefix = ""
+        
+        # Split into meaningful parts
+        parts = re.split(r'[/._-]', clean_string)
+        
+        # Filter meaningful parts (not empty, not single chars, not numbers only)
+        meaningful_parts = [p for p in parts if len(p) > 1 and not p.isdigit()]
+        
+        if not meaningful_parts:
+            # Fallback - use original string parts
+            parts = string_pattern.split('/')
+            meaningful_parts = [p for p in parts if len(p) > 1][-2:]
+        
+        # Create env var name from parts
+        if len(meaningful_parts) >= 2:
+            base_name = '_'.join(meaningful_parts[:2])
+        elif meaningful_parts:
+            base_name = meaningful_parts[0]
+        else:
+            base_name = "VAR"
+        
+        # Combine prefix and base name
+        if prefix:
+            env_name = f"{prefix}_{base_name}".upper()
+        else:
+            env_name = base_name.upper()
+        
+        # Clean up the name
+        env_name = re.sub(r'[^A-Z0-9_]', '_', env_name)
+        env_name = re.sub(r'_+', '_', env_name)
+        env_name = env_name.strip('_')
+        
+        # Ensure it's not too long
+        if len(env_name) > 20:
+            env_name = env_name[:20]
+        
+        return env_name
+    
     def generate_alias(self, command):
         """Generate a short alias for a command"""
         parts = command.split()
@@ -263,11 +450,14 @@ class TemporalAnalyzer:
     def calculate_temporal_savings(self):
         """Calculate savings for temporally recurring commands using smart alias logic"""
         print("=" * 80)
-        print("TEMPORAL SAVINGS ANALYSIS (Smart Aliasing)")
+        print("TEMPORAL SAVINGS ANALYSIS (Smart Aliasing & Environment Variables)")
         print("=" * 80)
         
         # Get smart alias recommendations
         alias_recommendations = self.analyze_root_commands()
+        
+        # Get environment variable recommendations
+        env_var_recommendations = self.analyze_environment_variables()
         
         # Sort by savings potential
         alias_recommendations.sort(key=lambda x: x['savings'], reverse=True)
@@ -300,13 +490,12 @@ class TemporalAnalyzer:
                     'original': cmd,
                     'alias': alias_name,
                     'count': count,
-                    'type': rec['type'],
-                        'chars_per_use': chars_saved_per_use,
-                        'total_chars': total_chars_saved_cmd,
-                        'non_adjacent_days': non_adjacent_days,
-                        'date_span': date_span.days,
-                        'type': 'alias'
-                    })
+                    'chars_per_use': chars_saved_per_use,
+                    'total_chars': total_chars_saved_cmd,
+                    'non_adjacent_days': non_adjacent_days,
+                    'date_span': date_span.days,
+                    'type': rec['type']
+                })
         
         # Sort by total character savings
         savings_data.sort(key=lambda x: x['total_chars'], reverse=True)
@@ -322,14 +511,48 @@ class TemporalAnalyzer:
                   f"{alias_type:<8} {data['count']:4d}x  {data['non_adjacent_days']:4d}d  {data['date_span']:6d}d  "
                   f"{data['chars_per_use']:2d}×{data['count']} = {data['total_chars']:4d} chars")
         
-        print(f"\nTEMPORAL SAVINGS SUMMARY:")
+        # Display environment variable suggestions
+        print(f"\nENVIRONMENT VARIABLE SUGGESTIONS (Frequent Strings):")
+        print("-" * 105)
+        print(f"{'Rank':<4} {'String':<35} {'Type':<8} {'Env Var':<15} {'Uses':<6} {'Cmds':<5} {'Days':<6} {'Savings':<15}")
+        print("-" * 105)
+        
+        env_total_chars_saved = 0
+        env_total_usage = 0
+        
+        for i, env_data in enumerate(env_var_recommendations[:15], 1):
+            env_total_chars_saved += env_data['total_chars_saved']
+            env_total_usage += env_data['total_usage']
+            
+            string_type = env_data.get('string_type', 'String')[:7]  # Truncate to fit
+            print(f"{i:3d}. {env_data['string']:<35} {string_type:<8} ${env_data['env_name']:<14} "
+                  f"{env_data['total_usage']:4d}x  {env_data['command_count']:3d}   {env_data['non_adjacent_days']:4d}d  "
+                  f"{env_data['chars_per_use']:2d}×{env_data['total_usage']} = {env_data['total_chars_saved']:4d} chars")
+        
+        if env_var_recommendations:
+            print(f"\nExample usage for top suggestion:")
+            top_env = env_var_recommendations[0]
+            print(f"  export {top_env['env_name']}=\"{top_env['string']}\"")
+            if top_env['commands']:
+                example_cmd = top_env['commands'][0]
+                replaced_cmd = example_cmd.replace(top_env['string'], f"${top_env['env_name']}")
+                print(f"  Before: {example_cmd}")
+                print(f"  After:  {replaced_cmd}")
+        
+        # Update total savings to include environment variables
+        total_chars_saved += env_total_chars_saved
+        total_commands_affected += env_total_usage
+        
+        print(f"\nCOMBINED SAVINGS SUMMARY:")
+        print(f"- Alias savings: {total_chars_saved - env_total_chars_saved:,} chars")
+        print(f"- Environment variable savings: {env_total_chars_saved:,} chars")
+        print(f"- TOTAL characters saved: {total_chars_saved:,} chars")
+        print(f"- Commands/usages affected: {total_commands_affected:,}")
         print(f"- Recurring commands analyzed: {len(self.commands):,}")
         print(f"- One-off commands filtered: {self.skipped_count:,}")
-        print(f"- Characters saved: {total_chars_saved:,}")
-        print(f"- Commands affected: {total_commands_affected:,}")
         
         if total_commands_affected > 0:
-            print(f"- Average savings per command: {total_chars_saved/total_commands_affected:.1f} characters")
+            print(f"- Average savings per usage: {total_chars_saved/total_commands_affected:.1f} characters")
             time_saved_minutes = total_chars_saved / 200
             print(f"- Estimated time saved: {time_saved_minutes:.1f} minutes")
         print()
