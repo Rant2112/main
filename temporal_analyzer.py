@@ -679,6 +679,151 @@ class TemporalAnalyzer:
         
         return result
     
+    def parse_existing_shortcuts(self):
+        """Parse existing aliases, functions, and environment variables from shell config"""
+        existing_aliases = {}  # command -> alias_name
+        existing_functions = {}  # prefix -> function_name  
+        existing_env_vars = {}  # value -> env_var_name
+        
+        # Focus on the main config files in the current directory 
+        config_files = [
+            Path(".aliases"),
+            Path(".bashrc"), 
+            Path(".bash_aliases"),
+            Path(".bash_aliases.personal")
+        ]
+        
+        for config_file in config_files:
+            if not config_file.exists():
+                continue
+                
+            try:
+                with open(config_file, 'r') as f:
+                    content = f.read()
+                
+                # Parse aliases: alias name="command" or alias name='command'
+                alias_pattern = r'alias\s+([^=]+)=[\'"]([^\'"]*)[\'"]\s*$'
+                for match in re.finditer(alias_pattern, content, re.MULTILINE):
+                    alias_name = match.group(1).strip()
+                    command = match.group(2).strip()
+                    if command:  # Only add non-empty commands
+                        existing_aliases[command] = alias_name
+                
+                # Parse functions: name() { ... }
+                function_pattern = r'(\w+)\s*\(\s*\)\s*\{'
+                for match in re.finditer(function_pattern, content, re.MULTILINE):
+                    func_name = match.group(1).strip()
+                    # For functions, we'll look for command prefixes that could use them
+                    # This is more complex, but let's start with the function name mapping
+                    existing_functions[func_name] = func_name
+                
+                # Parse environment variables: export VAR="value"
+                env_pattern = r'export\s+([^=]+)=[\'"](.*?)[\'"]'
+                for match in re.finditer(env_pattern, content):
+                    var_name = match.group(1).strip()
+                    value = match.group(2).strip()
+                    existing_env_vars[value] = var_name
+                    
+            except Exception as e:
+                # Skip files that can't be read
+                continue
+        
+        return existing_aliases, existing_functions, existing_env_vars
+
+    def analyze_missed_opportunities(self, alias_recommendations, function_recommendations, env_var_recommendations):
+        """Analyze command history to find cases where existing shortcuts weren't used"""
+        print("\n" + "=" * 80)
+        print("MISSED OPPORTUNITIES ANALYSIS")
+        print("=" * 80)
+        print("Finding instances where you typed full commands instead of using EXISTING shortcuts...")
+        
+        # Parse existing shortcuts from shell config
+        existing_aliases, existing_functions, existing_env_vars = self.parse_existing_shortcuts()
+        
+        print(f"Found {len(existing_aliases)} existing aliases, {len(existing_functions)} functions, {len(existing_env_vars)} env vars")
+        
+        missed_alias_savings = 0
+        missed_function_savings = 0
+        missed_env_var_savings = 0
+        
+        alias_missed_count = 0
+        function_missed_count = 0
+        env_var_missed_count = 0
+        
+        missed_alias_details = []
+        missed_env_var_details = []
+        
+        # Analyze command history for missed opportunities with EXISTING shortcuts
+        for cmd, count in self.all_commands.items():
+            # Check for missed alias opportunities (exact command matches)
+            if cmd in existing_aliases:
+                alias_name = existing_aliases[cmd]
+                chars_saved = len(cmd) - len(alias_name)
+                if chars_saved > 0:
+                    missed_alias_savings += chars_saved * count
+                    alias_missed_count += count
+                    missed_alias_details.append((cmd, alias_name, count, chars_saved * count))
+            
+            # Check for missed env var opportunities (string replacements)
+            for env_value, env_name in existing_env_vars.items():
+                if env_value in cmd and len(env_value) > 3:  # Only meaningful replacements
+                    occurrences = cmd.count(env_value)
+                    chars_saved_per_occurrence = len(env_value) - len(f"${env_name}")
+                    if chars_saved_per_occurrence > 0:
+                        total_chars_saved = chars_saved_per_occurrence * count * occurrences
+                        missed_env_var_savings += total_chars_saved
+                        env_var_missed_count += count * occurrences
+                        missed_env_var_details.append((env_value, env_name, count * occurrences, total_chars_saved))
+        
+        total_missed_savings = missed_alias_savings + missed_env_var_savings
+        total_missed_instances = alias_missed_count + env_var_missed_count
+        
+        print(f"\nMISSED EXISTING SHORTCUT OPPORTUNITIES:")
+        print("-" * 60)
+        
+        if alias_missed_count > 0:
+            print(f"🔍 Existing alias opportunities: {alias_missed_count:,} instances, {missed_alias_savings:,} chars wasted")
+            
+        if env_var_missed_count > 0:
+            print(f"🔍 Existing env var opportunities: {env_var_missed_count:,} instances, {missed_env_var_savings:,} chars wasted")
+        
+        if total_missed_instances > 0:
+            print(f"\n💡 TOTAL WASTED SAVINGS: {total_missed_savings:,} characters across {total_missed_instances:,} instances")
+            adoption_rate = 0  # Since we're measuring what they didn't use
+            print(f"💪 Current shortcut adoption rate: {adoption_rate}% for these patterns")
+            print(f"🎯 Time wasted by not using existing shortcuts: {total_missed_savings / 200:.1f} minutes")
+            
+            print(f"\n📝 TOP EXISTING SHORTCUTS YOU'RE NOT USING:")
+            
+            # Show top missed aliases
+            if missed_alias_details:
+                print(f"\n   📎 Most missed existing aliases:")
+                missed_alias_details.sort(key=lambda x: x[3], reverse=True)  # Sort by total chars saved
+                for i, (cmd, alias_name, count, total_chars) in enumerate(missed_alias_details[:5], 1):
+                    print(f"   {i}. '{cmd}' → '{alias_name}' ({count}x uses, {total_chars} chars wasted)")
+            
+            # Show top missed env vars
+            if missed_env_var_details:
+                print(f"\n   🌍 Most missed existing environment variables:")
+                # Aggregate by env var
+                env_var_summary = {}
+                for env_value, env_name, instances, total_chars in missed_env_var_details:
+                    if env_name in env_var_summary:
+                        env_var_summary[env_name] = (
+                            env_value, 
+                            env_var_summary[env_name][1] + instances,
+                            env_var_summary[env_name][2] + total_chars
+                        )
+                    else:
+                        env_var_summary[env_name] = (env_value, instances, total_chars)
+                
+                sorted_env_vars = sorted(env_var_summary.items(), key=lambda x: x[1][2], reverse=True)
+                for i, (env_name, (env_value, instances, total_chars)) in enumerate(sorted_env_vars[:5], 1):
+                    print(f"   {i}. '{env_value}' → '${env_name}' ({instances}x uses, {total_chars} chars wasted)")
+        else:
+            print("✅ Great! You're using all your existing shortcuts efficiently!")
+            print("   No missed opportunities found for existing aliases and environment variables.")
+    
     def generate_alias(self, command, used_names=None):
         """Generate a short alias for a command"""
         if used_names is None:
@@ -871,6 +1016,9 @@ class TemporalAnalyzer:
             print(f"- Average savings per usage: {total_chars_saved/total_commands_affected:.1f} characters")
             time_saved_minutes = total_chars_saved / 200
             print(f"- Estimated time saved: {time_saved_minutes:.1f} minutes")
+        
+        # Analyze missed opportunities 
+        self.analyze_missed_opportunities(alias_recommendations, function_recommendations, env_var_recommendations)
         
         # Generate output files
         self.generate_output_files(alias_recommendations, function_recommendations, env_var_recommendations)
