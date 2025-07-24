@@ -6,8 +6,8 @@ export COLOR_DEFAULT='\[\e[0m\]'
 
 # History file:
 shopt -s histappend
-export HISTSIZE=10000
-export HISTFILESIZE=20000
+export HISTSIZE=100000
+export HISTFILESIZE=200000
 export HISTTIMEFORMAT="%F %T "
 # Do not ignore duplicates.  This helps with alias / function / env var suggestions.
 export HISTCONTROL=''
