@@ -96,6 +96,20 @@ class TemporalAnalyzer:
         
         if not command or command.startswith('#'):
             return None
+        
+        # Normalize whitespace around common operators to group similar commands
+        # This makes "git fetch&&git" and "git fetch && git" equivalent
+        operators = ['&&', '||', '|', ';', '>', '>>', '<', '<<']
+        
+        for op in operators:
+            # Replace variations like "cmd&&cmd", "cmd &&cmd", "cmd&& cmd", "cmd && cmd"
+            # with standardized "cmd && cmd" (spaces around operators)
+            pattern = rf'\s*{re.escape(op)}\s*'
+            command = re.sub(pattern, f' {op} ', command)
+        
+        # Clean up any double spaces that might result
+        command = re.sub(r'\s+', ' ', command).strip()
+        
         return command
     
     def count_non_adjacent_days(self, dates):
@@ -249,6 +263,98 @@ class TemporalAnalyzer:
                         })
         
         return alias_recommendations
+    
+    def analyze_bash_functions(self):
+        """Analyze commands for common prefixes that could be bash functions"""
+        # Group commands by their prefixes (first 3-4 words)
+        prefix_groups = defaultdict(list)
+        
+        for cmd, count in self.all_commands.items():
+            if ' ' in cmd:  # Multi-word command
+                parts = cmd.split()
+                if len(parts) >= 3:  # At least 3 words for a meaningful prefix
+                    # Try different prefix lengths
+                    for prefix_len in [3, 4, 5]:
+                        if len(parts) >= prefix_len:
+                            prefix = ' '.join(parts[:prefix_len])
+                            prefix_groups[prefix].append({
+                                'command': cmd,
+                                'count': count,
+                                'remaining': ' '.join(parts[prefix_len:]) if len(parts) > prefix_len else ''
+                            })
+        
+        # Analyze prefix groups for function opportunities
+        function_recommendations = []
+        
+        for prefix, commands in prefix_groups.items():
+            if len(commands) < 2:  # Need at least 2 different variations
+                continue
+                
+            # Calculate total usage and variety
+            total_usage = sum(cmd['count'] for cmd in commands)
+            unique_suffixes = len(set(cmd['remaining'] for cmd in commands if cmd['remaining']))
+            
+            # Only suggest if there's real variety in the suffixes
+            if total_usage >= 10 and unique_suffixes >= 2:
+                # Generate function name
+                func_name = self.generate_function_name(prefix)
+                
+                # Calculate potential savings
+                avg_prefix_len = len(prefix)
+                func_call_len = len(f"{func_name} ")
+                chars_saved_per_use = avg_prefix_len - func_call_len
+                
+                if chars_saved_per_use > 0:
+                    total_chars_saved = chars_saved_per_use * total_usage
+                    
+                    # Get temporal info
+                    all_dates = set()
+                    for cmd_info in commands:
+                        all_dates.update(self.command_dates.get(cmd_info['command'], set()))
+                    
+                    non_adjacent_days = self.count_non_adjacent_days(all_dates)
+                    date_span = max(all_dates) - min(all_dates) if all_dates else timedelta(0)
+                    
+                    function_recommendations.append({
+                        'prefix': prefix,
+                        'func_name': func_name,
+                        'total_usage': total_usage,
+                        'variations': len(commands),
+                        'unique_suffixes': unique_suffixes,
+                        'commands': [cmd['command'] for cmd in commands[:3]],  # Top 3 examples
+                        'chars_per_use': chars_saved_per_use,
+                        'total_chars_saved': total_chars_saved,
+                        'non_adjacent_days': non_adjacent_days,
+                        'date_span': date_span.days if all_dates else 0
+                    })
+        
+        # Sort by total savings potential
+        function_recommendations.sort(key=lambda x: x['total_chars_saved'], reverse=True)
+        
+        return function_recommendations
+    
+    def generate_function_name(self, prefix):
+        """Generate a meaningful function name from a command prefix"""
+        parts = prefix.split()
+        
+        # Create function name from first letters or meaningful abbreviations
+        if len(parts) >= 3:
+            # For patterns like "g fetch && g log" -> "gfl"
+            if parts[0] == 'g' and '&&' in parts:
+                # Take first letter of each command part
+                name_parts = []
+                for part in parts:
+                    if part != '&&':
+                        name_parts.append(part[0])
+                func_name = ''.join(name_parts)
+            else:
+                # Generic: take first letter of each meaningful word
+                meaningful_words = [p for p in parts if len(p) > 1 and p not in ['&&', '||', '|']]
+                func_name = ''.join(p[0] for p in meaningful_words[:3])
+        else:
+            func_name = ''.join(p[0] for p in parts)
+        
+        return func_name.lower()
     
     def analyze_environment_variables(self):
         """Analyze commands for frequently used strings that could be environment variables"""
@@ -457,6 +563,9 @@ class TemporalAnalyzer:
         # Get smart alias recommendations
         alias_recommendations = self.analyze_root_commands()
         
+        # Get bash function recommendations
+        function_recommendations = self.analyze_bash_functions()
+        
         # Get environment variable recommendations
         env_var_recommendations = self.analyze_environment_variables()
         
@@ -512,6 +621,34 @@ class TemporalAnalyzer:
                   f"{alias_type:<8} {data['count']:4d}x  {data['non_adjacent_days']:4d}d  {data['date_span']:6d}d  "
                   f"{data['chars_per_use']:2d}×{data['count']} = {data['total_chars']:4d} chars")
         
+        # Display bash function suggestions
+        print(f"\nBASH FUNCTION SUGGESTIONS (Common Prefixes):")
+        print("-" * 105)
+        print(f"{'Rank':<4} {'Common Prefix':<35} {'Function':<8} {'Uses':<6} {'Vars':<5} {'Days':<6} {'Savings':<15}")
+        print("-" * 105)
+        
+        func_total_chars_saved = 0
+        func_total_usage = 0
+        
+        for i, func_data in enumerate(function_recommendations[:10], 1):
+            func_total_chars_saved += func_data['total_chars_saved']
+            func_total_usage += func_data['total_usage']
+            
+            print(f"{i:3d}. {func_data['prefix']:<35} {func_data['func_name']:<8} "
+                  f"{func_data['total_usage']:4d}x  {func_data['variations']:3d}   {func_data['non_adjacent_days']:4d}d  "
+                  f"{func_data['chars_per_use']:2d}×{func_data['total_usage']} = {func_data['total_chars_saved']:4d} chars")
+        
+        if function_recommendations:
+            print(f"\nExample function for top suggestion:")
+            top_func = function_recommendations[0]
+            print(f"  {top_func['func_name']}() {{")
+            print(f"      {top_func['prefix']} \"$@\"")
+            print(f"  }}")
+            if top_func['commands']:
+                example_cmd = top_func['commands'][0]
+                remaining = example_cmd[len(top_func['prefix']):].strip()
+                print(f"  Usage: {top_func['func_name']} {remaining}")
+        
         # Display environment variable suggestions
         print(f"\nENVIRONMENT VARIABLE SUGGESTIONS (Frequent Strings):")
         print("-" * 105)
@@ -540,12 +677,13 @@ class TemporalAnalyzer:
                 print(f"  Before: {example_cmd}")
                 print(f"  After:  {replaced_cmd}")
         
-        # Update total savings to include environment variables
-        total_chars_saved += env_total_chars_saved
-        total_commands_affected += env_total_usage
+        # Update total savings to include functions and environment variables
+        total_chars_saved += func_total_chars_saved + env_total_chars_saved
+        total_commands_affected += func_total_usage + env_total_usage
         
         print(f"\nCOMBINED SAVINGS SUMMARY:")
-        print(f"- Alias savings: {total_chars_saved - env_total_chars_saved:,} chars")
+        print(f"- Alias savings: {total_chars_saved - func_total_chars_saved - env_total_chars_saved:,} chars")
+        print(f"- Function savings: {func_total_chars_saved:,} chars")
         print(f"- Environment variable savings: {env_total_chars_saved:,} chars")
         print(f"- TOTAL characters saved: {total_chars_saved:,} chars")
         print(f"- Commands/usages affected: {total_commands_affected:,}")
@@ -558,13 +696,13 @@ class TemporalAnalyzer:
             print(f"- Estimated time saved: {time_saved_minutes:.1f} minutes")
         
         # Generate output files
-        self.generate_output_files(alias_recommendations, env_var_recommendations)
+        self.generate_output_files(alias_recommendations, function_recommendations, env_var_recommendations)
         print()
         
         return savings_data
     
-    def generate_output_files(self, alias_recommendations, env_var_recommendations):
-        """Generate properly formatted alias and export files"""
+    def generate_output_files(self, alias_recommendations, function_recommendations, env_var_recommendations):
+        """Generate properly formatted alias, function, and export files"""
         
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
@@ -600,6 +738,34 @@ class TemporalAnalyzer:
                 
                 f.write(f"# {i:2d}. {original} -> {alias_name} ({count} uses, {savings} chars saved)\n")
                 f.write(f"alias {alias_name}='{clean_original}'\n\n")
+        
+        # Generate functions file
+        functions_file = "/tmp/bash_functions_suggestions.sh"
+        with open(functions_file, 'w') as f:
+            f.write(f"#!/bin/bash\n")
+            f.write(f"# Bash Functions - Generated by Temporal Analyzer on {timestamp}\n")
+            f.write(f"# Based on analysis of common command prefixes across 5+ non-adjacent days\n")
+            f.write(f"# Source this file or add to your ~/.bashrc\n\n")
+            
+            for i, func_data in enumerate(function_recommendations[:10], 1):  # Top 10
+                prefix = func_data['prefix']
+                func_name = func_data['func_name']
+                usage = func_data['total_usage']
+                variations = func_data['variations']
+                savings = func_data['total_chars_saved']
+                
+                f.write(f"# {i:2d}. {prefix} -> {func_name}() ({usage} uses, {variations} variations, {savings} chars saved)\n")
+                f.write(f"{func_name}() {{\n")
+                f.write(f"    {prefix} \"$@\"\n")
+                f.write(f"}}\n\n")
+                
+                # Add usage examples for top few
+                if i <= 3 and func_data['commands']:
+                    f.write(f"# Example usage:\n")
+                    for j, example_cmd in enumerate(func_data['commands'][:2], 1):
+                        remaining = example_cmd[len(prefix):].strip()
+                        f.write(f"#   {func_name} {remaining}\n")
+                    f.write(f"\n")
         
         # Generate exports file  
         exports_file = "/tmp/bash_exports_suggestions.sh"
@@ -642,14 +808,63 @@ class TemporalAnalyzer:
         
         # Print file locations
         print(f"\n📁 OUTPUT FILES GENERATED:")
-        print(f"   Aliases:  {aliases_file}")
-        print(f"   Exports:  {exports_file}")
+        print(f"   Aliases:   {aliases_file}")
+        print(f"   Functions: {functions_file}")
+        print(f"   Exports:   {exports_file}")
         print(f"\n🚀 TO APPLY:")
         print(f"   source {aliases_file}")
+        print(f"   source {functions_file}")
         print(f"   source {exports_file}")
         print(f"\n💾 TO MAKE PERMANENT:")
-        print(f"   cat {aliases_file} >> ~/.bash_aliases")  
+        print(f"   cat {aliases_file} >> ~/.bash_aliases")
+        print(f"   cat {functions_file} >> ~/.bashrc")  
         print(f"   cat {exports_file} >> ~/.bashrc")
+        
+        # Check for HISTCONTROL settings that affect statistics accuracy
+        self.check_history_settings()
+    
+    def check_history_settings(self):
+        """Check bash history settings that could affect statistics accuracy"""
+        try:
+            # Check HISTCONTROL environment variable
+            result = subprocess.run(['bash', '-c', 'echo "$HISTCONTROL"'], 
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, 
+                                   universal_newlines=True, timeout=5)
+            
+            histcontrol = result.stdout.strip()
+            
+            if histcontrol and ('ignoredups' in histcontrol or 'ignoreboth' in histcontrol):
+                print(f"\n⚠️  BASH HISTORY WARNING:")
+                print(f"   Your HISTCONTROL is set to '{histcontrol}'")
+                print(f"   This ignores consecutive duplicate commands, so:")
+                print(f"   📊 Frequency statistics are UNDERESTIMATED")
+                print(f"   🔢 Actual usage counts are likely much HIGHER")
+                print(f"   💰 Potential savings could be much GREATER")
+                print(f"\n   To get accurate statistics, consider temporarily setting:")
+                print(f"   export HISTCONTROL=''")
+                print(f"   Then rebuild your bash history for a few days.")
+            
+            # Check HISTSIZE and HISTFILESIZE
+            result_size = subprocess.run(['bash', '-c', 'echo "$HISTSIZE:$HISTFILESIZE"'], 
+                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, 
+                                        universal_newlines=True, timeout=5)
+            
+            hist_sizes = result_size.stdout.strip().split(':')
+            if len(hist_sizes) == 2:
+                histsize = hist_sizes[0] if hist_sizes[0] else "unset"
+                histfilesize = hist_sizes[1] if hist_sizes[1] else "unset"
+                
+                # Warn if history is limited
+                if histsize.isdigit() and int(histsize) < 10000:
+                    print(f"\n💡 HISTORY SIZE NOTICE:")
+                    print(f"   Your HISTSIZE is {histsize} (relatively small)")
+                    print(f"   Consider increasing it for better analysis:")
+                    print(f"   export HISTSIZE=50000")
+                    print(f"   export HISTFILESIZE=50000")
+                        
+        except (subprocess.SubprocessError, subprocess.TimeoutExpired):
+            # Silently ignore if we can't check - don't want to break the analysis
+            pass
     
     def show_temporal_summary(self):
         """Show temporal filtering summary"""
