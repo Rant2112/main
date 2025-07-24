@@ -23,6 +23,78 @@ class TemporalAnalyzer:
         self.skipped_count = 0
         self.skip_reasons = Counter()
         
+        # Common shell built-ins and system commands to avoid
+        self.reserved_names = {
+            # Shell built-ins
+            'cd', 'echo', 'pwd', 'test', 'true', 'false', 'exit', 'return', 'break', 'continue',
+            'if', 'then', 'else', 'elif', 'fi', 'for', 'while', 'until', 'do', 'done', 'case',
+            'esac', 'function', 'select', 'time', 'exec', 'eval', 'source', 'alias', 'unalias',
+            'export', 'unset', 'readonly', 'declare', 'local', 'let', 'shift', 'set', 'unset',
+            'trap', 'wait', 'jobs', 'fg', 'bg', 'disown', 'suspend', 'kill', 'killall',
+            # Common system commands
+            'ls', 'cp', 'mv', 'rm', 'mkdir', 'rmdir', 'touch', 'cat', 'less', 'more', 'head',
+            'tail', 'grep', 'find', 'sort', 'cut', 'awk', 'sed', 'tr', 'wc', 'diff', 'patch',
+            'tar', 'gzip', 'zip', 'unzip', 'curl', 'wget', 'ssh', 'scp', 'rsync', 'git',
+            'vim', 'nano', 'emacs', 'python', 'python3', 'node', 'npm', 'docker', 'make',
+            'gcc', 'g++', 'java', 'javac', 'mysql', 'psql', 'sudo', 'su', 'chmod', 'chown',
+            'chgrp', 'ps', 'top', 'htop', 'df', 'du', 'free', 'mount', 'umount', 'which',
+            'whereis', 'man', 'info', 'help', 'history', 'clear', 'reset', 'tput', 'stty'
+        }
+        
+    def is_name_available(self, name):
+        """Check if a name is available (doesn't conflict with existing commands)"""
+        # Check against reserved names list
+        if name.lower() in self.reserved_names:
+            return False
+        
+        # Check if it's an existing command using 'type'
+        try:
+            result = subprocess.run(['type', name], 
+                                  stdout=subprocess.PIPE, 
+                                  stderr=subprocess.PIPE, 
+                                  universal_newlines=True)
+            # If type succeeds, the command exists
+            if result.returncode == 0:
+                return False
+        except:
+            # If subprocess fails, assume name is available
+            pass
+        
+        return True
+    
+    def generate_safe_name(self, base_name, used_names, prefix="", suffix=""):
+        """Generate a safe name that doesn't conflict with existing commands"""
+        # Start with the base name
+        candidate = f"{prefix}{base_name}{suffix}".lower()
+        
+        # Remove any remaining invalid characters
+        candidate = re.sub(r'[^a-zA-Z0-9_-]', '', candidate)
+        
+        # If empty after cleaning, use fallback
+        if not candidate:
+            candidate = "cmd"
+        
+        # Check if base name is available
+        if candidate not in used_names and self.is_name_available(candidate):
+            return candidate
+        
+        # Try variations with numbers
+        counter = 1
+        while counter <= 99:  # Reasonable limit
+            test_name = f"{candidate}{counter}"
+            if test_name not in used_names and self.is_name_available(test_name):
+                return test_name
+            counter += 1
+        
+        # Try with different suffixes if numbered approach fails
+        for alt_suffix in ['x', 'alt', 'new', 'my']:
+            test_name = f"{candidate}{alt_suffix}"
+            if test_name not in used_names and self.is_name_available(test_name):
+                return test_name
+        
+        # Final fallback
+        return f"cmd{counter}"
+        
     def parse_timestamp(self, line):
         """Extract timestamp from bash history line"""
         # Look for timestamp format: #1234567890
@@ -256,7 +328,7 @@ class TemporalAnalyzer:
                         alias_recommendations.append({
                             'type': 'pattern',
                             'original': cmd['command'],
-                            'alias': self.generate_alias(cmd['command']),
+                            'alias': 'placeholder',  # Will be filled in later with collision detection
                             'count': cmd['count'],
                             'savings': cmd['savings_potential'],
                             'patterns': [cmd['command']]
@@ -296,8 +368,8 @@ class TemporalAnalyzer:
             
             # Only suggest if there's real variety in the suffixes
             if total_usage >= 10 and unique_suffixes >= 2:
-                # Generate function name
-                func_name = self.generate_function_name(prefix)
+                # Function name will be generated later with collision detection
+                func_name = 'placeholder'
                 
                 # Calculate potential savings
                 avg_prefix_len = len(prefix)
@@ -333,70 +405,104 @@ class TemporalAnalyzer:
         
         return function_recommendations
     
-    def generate_function_name(self, prefix):
+    def generate_function_name(self, prefix, used_names=None):
         """Generate a meaningful function name from a command prefix"""
-        parts = prefix.split()
+        if used_names is None:
+            used_names = set()
+            
+        # Filter out shell operators first
+        clean_prefix = re.sub(r'[&|;><]+', ' ', prefix)
+        parts = clean_prefix.split()
         
-        # Create function name from first letters or meaningful abbreviations
-        if len(parts) >= 3:
-            # For patterns like "g fetch && g log" -> "gfl"
-            if parts[0] == 'g' and '&&' in parts:
-                # Take first letter of each command part
-                name_parts = []
-                for part in parts:
-                    if part != '&&':
-                        name_parts.append(part[0])
-                func_name = ''.join(name_parts)
+        # Extract meaningful words (alphanumeric only)
+        meaningful_words = []
+        for part in parts:
+            clean_part = re.sub(r'[^a-zA-Z0-9]', '', part)
+            if len(clean_part) > 0:
+                meaningful_words.append(clean_part)
+        
+        if not meaningful_words:
+            return self.generate_safe_name("func", used_names)
+        
+        # Create base function name from first letters
+        if len(meaningful_words) >= 3:
+            if meaningful_words[0] == 'g':
+                # For git commands, take more letters for clarity
+                base_func_name = meaningful_words[0] + ''.join(p[0] for p in meaningful_words[1:3])
             else:
                 # Generic: take first letter of each meaningful word
-                meaningful_words = [p for p in parts if len(p) > 1 and p not in ['&&', '||', '|']]
-                func_name = ''.join(p[0] for p in meaningful_words[:3])
+                base_func_name = ''.join(p[0] for p in meaningful_words[:3])
+        elif len(meaningful_words) == 2:
+            base_func_name = meaningful_words[0][0] + meaningful_words[1][0]
         else:
-            func_name = ''.join(p[0] for p in parts)
+            base_func_name = meaningful_words[0][:3]  # First 3 chars if single word
         
-        return func_name.lower()
+        # Ensure function name contains only valid characters
+        base_func_name = re.sub(r'[^a-zA-Z0-9_-]', '', base_func_name)
+        
+        # Fallback if name becomes empty
+        if not base_func_name:
+            base_func_name = "func"
+        
+        # Generate safe name using collision detection
+        return self.generate_safe_name(base_func_name, used_names)
     
     def analyze_environment_variables(self):
         """Analyze commands for frequently used strings that could be environment variables"""
         # Extract any repeated string patterns from all commands
         string_usage = defaultdict(list)  # string -> list of (command, count) tuples
+        path_normalization_map = {}  # maps normalized paths back to original forms
         
         for cmd, count in self.all_commands.items():
-            # Look for various repeatable string patterns
+            # Look for various repeatable string patterns - more specific to avoid word splitting
             patterns_to_check = [
                 # Git branch/remote patterns
-                r'origin/[\w/.-]+',
-                r'upstream/[\w/.-]+',
-                # Paths (absolute and relative)
-                r'/[\w/.-]{6,}',
-                r'[\w.-]+/[\w/.-]{6,}',
+                r'origin/[\w/.+-]+',
+                r'upstream/[\w/.+-]+',
+                # Long paths (absolute and relative) - 8+ chars to avoid short words
+                r'/[\w/.+-]{8,}',
+                r'(?<!\w)[\w.-]+/[\w/.+-]{8,}',  # relative paths, not preceded by word char
                 # URLs and network patterns
-                r'https?://[\w/.-]+',
-                r'[\w.-]+\.[\w.-]+/[\w/.-]+',
+                r'https?://[\w/.+-]+',
+                r'[\w.-]+\.[\w.-]+/[\w/.+-]+',
                 r'[\w.-]+:\d+',  # host:port
-                # File extensions and patterns
-                r'--[\w-]+=[\w/.-]{4,}',  # --flag=value
-                r'--[\w-]{4,}',  # --long-flag
-                r'-[\w]{2,}',  # multi-char flags like -la, -rf
+                # Flag patterns with values
+                r'--[\w-]+=[\w/.+-]{4,}',  # --flag=value
+                r'--[\w-]{6,}',  # --long-flag (6+ chars to avoid short flags)
                 # Version/hash patterns
                 r'v\d+\.\d+[\w.-]*',  # version numbers
-                r'[a-f0-9]{8,}',  # hex strings (commit hashes, etc.)
-                # File patterns
-                r'[\w.-]+\.[\w]{2,4}',  # file.extension
-                # Command sequences
-                r'[\w.-]{4,}',  # any word-like string 4+ chars
+                r'[a-f0-9]{12,}',  # hex strings (commit hashes, etc.) - longer to avoid short IDs
+                # File patterns with extensions
+                r'[\w.-]+\.(?:py|js|ts|cpp|c|h|md|txt|log|conf|json|xml|yaml|yml)(?!\w)',
+                # Multi-component paths/identifiers (avoid simple words)
+                r'[\w.-]*[/_-][\w/.+-]{6,}',  # contains separator and is long enough
             ]
             
             for pattern in patterns_to_check:
                 matches = re.findall(pattern, cmd)
                 for match in matches:
                     # Filter criteria for environment variable candidates
-                    if (len(match) >= 4 and  # Minimum length
+                    if (len(match) >= 6 and  # Increased minimum length
                         not match.isdigit() and  # Not just a number
                         not re.match(r'^-[a-zA-Z]$', match) and  # Not single letter flags
-                        not match in ['true', 'false', 'null', 'none'] and  # Not common values
-                        len(set(match)) > 2):  # Has some variety in characters
-                        string_usage[match].append((cmd, count))
+                        not match.lower() in ['true', 'false', 'null', 'none', 'origin', 'master', 'main'] and  # Not common values
+                        len(set(match.replace('/', '').replace('-', '').replace('_', '').replace('.', ''))) > 2 and  # Has variety
+                        '/' in match or '-' in match or '_' in match or '.' in match):  # Contains separators (compound strings)
+                        
+                        # Normalize paths by removing leading slash for comparison
+                        normalized_match = match
+                        if match.startswith('/') and len(match) > 1:
+                            normalized_match = match[1:]
+                            # Track the mapping to use the most common form later
+                            if normalized_match not in path_normalization_map:
+                                path_normalization_map[normalized_match] = match
+                        elif normalized_match.startswith('/'):
+                            # If we have a relative path, check if absolute version exists
+                            absolute_match = '/' + match
+                            if absolute_match in path_normalization_map:
+                                normalized_match = path_normalization_map[absolute_match][1:]  # Use existing form
+                        
+                        string_usage[normalized_match].append((cmd, count))
         
         # Analyze string usage frequency
         env_var_candidates = []
@@ -406,19 +512,38 @@ class TemporalAnalyzer:
             total_usage = sum(count for _, count in usages)
             command_count = len(usages)
             
+            # Determine the best form to display (with or without leading slash)
+            display_pattern = string_pattern
+            
+            # Count usage of absolute vs relative forms
+            absolute_usage = 0
+            relative_usage = 0
+            
+            for cmd, count in usages:
+                # Check if this command uses the absolute or relative form
+                absolute_form = '/' + string_pattern
+                if absolute_form in cmd:
+                    absolute_usage += count
+                else:
+                    relative_usage += count
+            
+            # Use the more common form for display
+            if absolute_usage > relative_usage and not string_pattern.startswith('/'):
+                display_pattern = '/' + string_pattern
+            
             # Adjust thresholds based on string type and length
-            min_usage = max(5, 20 - len(string_pattern))  # Longer strings need fewer uses
-            min_commands = 2 if len(string_pattern) > 10 else 3
+            min_usage = max(5, 20 - len(display_pattern))  # Longer strings need fewer uses
+            min_commands = 2 if len(display_pattern) > 10 else 3
             
             # Only suggest if used frequently enough
             if total_usage >= min_usage and command_count >= min_commands:
-                # Generate environment variable name
-                env_name = self.generate_env_var_name(string_pattern)
+                # Generate environment variable name based on the display pattern
+                env_name = self.generate_env_var_name(display_pattern)
                 
                 # Calculate potential savings
                 # Each usage saves (len(string) - len($ENV_NAME))
                 var_ref_length = len(f"${env_name}")
-                chars_saved_per_use = len(string_pattern) - var_ref_length
+                chars_saved_per_use = len(display_pattern) - var_ref_length
                 
                 if chars_saved_per_use > 0:
                     total_chars_saved = chars_saved_per_use * total_usage
@@ -432,7 +557,7 @@ class TemporalAnalyzer:
                     date_span = max(all_dates) - min(all_dates) if all_dates else timedelta(0)
                     
                     env_var_candidates.append({
-                        'string': string_pattern,
+                        'string': display_pattern,
                         'env_name': env_name,
                         'total_usage': total_usage,
                         'command_count': command_count,
@@ -441,7 +566,7 @@ class TemporalAnalyzer:
                         'total_chars_saved': total_chars_saved,
                         'non_adjacent_days': non_adjacent_days,
                         'date_span': date_span.days if all_dates else 0,
-                        'string_type': self.classify_string_type(string_pattern)
+                        'string_type': self.classify_string_type(display_pattern)
                     })
         
         # Sort by total savings potential
@@ -461,7 +586,7 @@ class TemporalAnalyzer:
             return 'Flag'
         elif re.match(r'[\w.-]+:\d+', string_pattern):
             return 'Host:Port'
-        elif re.match(r'[a-f0-9]{8,}', string_pattern):
+        elif re.match(r'[a-f0-9]{12,}', string_pattern):
             return 'Hash'
         elif re.match(r'v\d+\.\d+', string_pattern):
             return 'Version'
@@ -471,88 +596,126 @@ class TemporalAnalyzer:
             return 'String'
     
     def generate_env_var_name(self, string_pattern):
-        """Generate a meaningful environment variable name for any string pattern"""
-        clean_string = string_pattern
+        """Generate SHORT, practical environment variable names to actually save typing"""
+        # Priority: make it SHORT and meaningful, not verbose
         
-        # Handle different string types
+        # Special cases for common patterns - use ultra-short names
+        if '/proj_risc/user_dev/' in string_pattern and 'wt' in string_pattern:
+            return "WT"
+        
+        if 'ascalon' in string_pattern and 'work' in string_pattern:
+            if 'HEAD' in string_pattern:
+                return "AWH"  # Ascalon Work Head
+            return "AW"   # Ascalon Work
+        
+        if 'bzsim' in string_pattern:
+            return "BZ"
+        
+        if 'infra' in string_pattern and 'checkin' in string_pattern:
+            return "IC"  # Infra Checkin
+            
+        if 'risc-p-cores' in string_pattern or 'risc_p_cores' in string_pattern:
+            return "RC"  # Risc Cores
+            
+        if 'scripts' in string_pattern and 'open' in string_pattern:
+            return "SO"  # Scripts Open
+        
+        # Generic patterns - focus on the most distinctive part
         if re.match(r'^https?://', string_pattern):
-            # URL handling
-            clean_string = re.sub(r'^https?://', '', clean_string)
-            clean_string = re.sub(r'/.*$', '', clean_string)  # Keep just hostname
-            prefix = "URL"
-        elif re.match(r'^--[\w-]+', string_pattern):
-            # Flag handling
-            clean_string = re.sub(r'^--', '', string_pattern)
-            prefix = "FLAG"
-        elif re.match(r'^origin/', string_pattern):
-            # Git branch/remote
-            clean_string = re.sub(r'^origin/', '', string_pattern)
-            prefix = "BRANCH"
-        elif re.match(r'^/', string_pattern):
-            # Absolute path
-            clean_string = re.sub(r'^/proj_risc/user_dev/[\w]+/', '', clean_string)
-            clean_string = re.sub(r'^/home/[\w]+/', '', clean_string)
-            clean_string = re.sub(r'^/', '', clean_string)
-            prefix = ""
-        elif re.match(r'[\w.-]+:\d+', string_pattern):
-            # Host:port
-            clean_string = re.sub(r':\d+$', '', string_pattern)
-            prefix = "HOST"
-        elif re.match(r'[a-f0-9]{8,}', string_pattern):
-            # Hash/commit
-            return "COMMIT_HASH"
-        elif re.match(r'v\d+\.\d+', string_pattern):
-            # Version
-            return "VERSION"
-        else:
-            prefix = ""
+            # For URLs, use domain initials
+            domain = re.sub(r'^https?://([^/]+).*', r'\1', string_pattern)
+            parts = domain.split('.')
+            if len(parts) >= 2:
+                return ''.join(p[0].upper() for p in parts[-2:])  # e.g. github.com -> GC
+            return domain[:3].upper()
         
-        # Split into meaningful parts
-        parts = re.split(r'[/._-]', clean_string)
+        if re.match(r'^--', string_pattern):
+            # For flags, drop -- and use first 2-3 chars, remove dashes
+            flag = re.sub(r'^--', '', string_pattern)
+            flag = re.sub(r'[-_]', '', flag)  # Remove separators
+            return flag[:3].upper()
         
-        # Filter meaningful parts (not empty, not single chars, not numbers only)
-        meaningful_parts = [p for p in parts if len(p) > 1 and not p.isdigit()]
+        if re.match(r'^origin/', string_pattern):
+            # For git branches, use initials of meaningful parts
+            branch = re.sub(r'^origin/', '', string_pattern)
+            if '/' in branch:
+                parts = [p for p in branch.split('/') if p and len(p) > 1]
+                if len(parts) >= 2:
+                    return ''.join(p[0].upper() for p in parts[:2])
+            return branch[:3].upper()
+        
+        # For paths, use the most distinctive 2-3 character part
+        if '/' in string_pattern:
+            parts = [p for p in string_pattern.split('/') if p and len(p) > 1 and not p.isdigit()]
+            if parts:
+                # Use the shortest meaningful part that's distinctive
+                distinctive_part = min(parts, key=len)
+                if len(distinctive_part) <= 3:
+                    return distinctive_part.upper()
+                # Or use initials of the last 2 parts
+                if len(parts) >= 2:
+                    return ''.join(p[0].upper() for p in parts[-2:])
+                return parts[-1][:3].upper()
+        
+        # For other strings, use first few characters or initials
+        clean = re.sub(r'[^a-zA-Z0-9]', '', string_pattern)
+        if len(clean) <= 3:
+            return clean.upper()
+        
+        # Use initials if it has separators
+        if any(sep in string_pattern for sep in ['_', '-', '.']):
+            parts = re.split(r'[_.-]', string_pattern)
+            parts = [p for p in parts if p and len(p) > 0]
+            if len(parts) >= 2:
+                return ''.join(p[0].upper() for p in parts[:3])
+        
+        # Fallback: first 3 chars
+        result = clean[:3].upper()
+        
+        # Final cleanup: ensure valid bash environment variable name
+        result = re.sub(r'[^A-Z0-9_]', '', result)
+        if not result:
+            result = "VAR"
+        
+        return result
+    
+    def generate_alias(self, command, used_names=None):
+        """Generate a short alias for a command"""
+        if used_names is None:
+            used_names = set()
+            
+        # Filter out shell operators and special characters from command first
+        clean_command = re.sub(r'[&|;><]+', ' ', command)
+        parts = clean_command.split()
+        
+        # Remove parts that are purely special characters or very short
+        meaningful_parts = []
+        for part in parts:
+            # Extract only alphanumeric characters for alias generation
+            clean_part = re.sub(r'[^a-zA-Z0-9]', '', part)
+            if len(clean_part) > 0:
+                meaningful_parts.append(clean_part)
         
         if not meaningful_parts:
-            # Fallback - use original string parts
-            parts = string_pattern.split('/')
-            meaningful_parts = [p for p in parts if len(p) > 1][-2:]
+            return self.generate_safe_name("cmd", used_names)
         
-        # Create env var name from parts
-        if len(meaningful_parts) >= 2:
-            base_name = '_'.join(meaningful_parts[:2])
-        elif meaningful_parts:
-            base_name = meaningful_parts[0]
+        # Generate base alias from meaningful parts
+        if len(meaningful_parts) == 2:
+            base_alias = meaningful_parts[0][0] + meaningful_parts[1][0]
+        elif meaningful_parts[0] in ['git', 'g', 'docker', 'npm', 'pip']:
+            base_alias = meaningful_parts[0][0] + ''.join(p[0] for p in meaningful_parts[1:3])
         else:
-            base_name = "VAR"
+            base_alias = ''.join(p[0] for p in meaningful_parts[:3])
         
-        # Combine prefix and base name
-        if prefix:
-            env_name = f"{prefix}_{base_name}".upper()
-        else:
-            env_name = base_name.upper()
+        # Clean the base alias
+        base_alias = re.sub(r'[^a-zA-Z0-9_-]', '', base_alias)
         
-        # Clean up the name
-        env_name = re.sub(r'[^A-Z0-9_]', '_', env_name)
-        env_name = re.sub(r'_+', '_', env_name)
-        env_name = env_name.strip('_')
+        # Fallback if alias becomes empty
+        if not base_alias:
+            base_alias = "cmd"
         
-        # Ensure it's not too long
-        if len(env_name) > 20:
-            env_name = env_name[:20]
-        
-        return env_name
-    
-    def generate_alias(self, command):
-        """Generate a short alias for a command"""
-        parts = command.split()
-        
-        if len(parts) == 2:
-            return parts[0][0] + parts[1][0]
-        elif parts[0] in ['git', 'g', 'docker', 'npm', 'pip']:
-            return parts[0][0] + ''.join(p[0] for p in parts[1:3])
-        else:
-            return ''.join(p[0] for p in parts[:3])
+        # Generate safe name using collision detection
+        return self.generate_safe_name(base_alias, used_names)
     
     def calculate_temporal_savings(self):
         """Calculate savings for temporally recurring commands using smart alias logic"""
@@ -615,9 +778,16 @@ class TemporalAnalyzer:
         print(f"{'Rank':<4} {'Original Command':<30} {'Alias':<8} {'Type':<8} {'Uses':<6} {'Days':<6} {'Span':<8} {'Savings':<15}")
         print("-" * 95)
         
+        # Track used display alias names
+        used_display_aliases = set()
+        
         for i, data in enumerate(savings_data[:20], 1):
+            # Generate safe alias name for display
+            safe_alias = self.generate_alias(data['original'], used_display_aliases)
+            used_display_aliases.add(safe_alias)
+            
             alias_type = data.get('type', 'pattern')[:7]  # Truncate to fit
-            print(f"{i:3d}. {data['original']:<30} {data['alias']:<8} "
+            print(f"{i:3d}. {data['original']:<30} {safe_alias:<8} "
                   f"{alias_type:<8} {data['count']:4d}x  {data['non_adjacent_days']:4d}d  {data['date_span']:6d}d  "
                   f"{data['chars_per_use']:2d}×{data['count']} = {data['total_chars']:4d} chars")
         
@@ -630,11 +800,18 @@ class TemporalAnalyzer:
         func_total_chars_saved = 0
         func_total_usage = 0
         
+        # Track used display function names
+        used_display_functions = set()
+        
         for i, func_data in enumerate(function_recommendations[:10], 1):
             func_total_chars_saved += func_data['total_chars_saved']
             func_total_usage += func_data['total_usage']
             
-            print(f"{i:3d}. {func_data['prefix']:<35} {func_data['func_name']:<8} "
+            # Generate safe function name for display
+            safe_func_name = self.generate_function_name(func_data['prefix'], used_display_functions)
+            used_display_functions.add(safe_func_name)
+            
+            print(f"{i:3d}. {func_data['prefix']:<35} {safe_func_name:<8} "
                   f"{func_data['total_usage']:4d}x  {func_data['variations']:3d}   {func_data['non_adjacent_days']:4d}d  "
                   f"{func_data['chars_per_use']:2d}×{func_data['total_usage']} = {func_data['total_chars_saved']:4d} chars")
         
@@ -721,16 +898,11 @@ class TemporalAnalyzer:
             
             for i, rec in enumerate(sorted_aliases[:20], 1):  # Top 20
                 original = rec['original']
-                alias_name = rec['alias']
                 count = rec['count']
                 savings = rec['savings']
                 
-                # Ensure unique alias names
-                base_alias = alias_name
-                counter = 1
-                while alias_name in used_aliases:
-                    alias_name = f"{base_alias}{counter}"
-                    counter += 1
+                # Generate safe alias name with collision detection
+                alias_name = self.generate_alias(original, used_aliases)
                 used_aliases.add(alias_name)
                 
                 # Clean up alias name and original command for bash
@@ -747,12 +919,17 @@ class TemporalAnalyzer:
             f.write(f"# Based on analysis of common command prefixes across 5+ non-adjacent days\n")
             f.write(f"# Source this file or add to your ~/.bashrc\n\n")
             
+            used_function_names = set()  # Track used function names to avoid collisions
+            
             for i, func_data in enumerate(function_recommendations[:10], 1):  # Top 10
                 prefix = func_data['prefix']
-                func_name = func_data['func_name']
                 usage = func_data['total_usage']
                 variations = func_data['variations']
                 savings = func_data['total_chars_saved']
+                
+                # Generate safe function name with collision detection
+                func_name = self.generate_function_name(prefix, used_function_names)
+                used_function_names.add(func_name)
                 
                 f.write(f"# {i:2d}. {prefix} -> {func_name}() ({usage} uses, {variations} variations, {savings} chars saved)\n")
                 f.write(f"{func_name}() {{\n")
