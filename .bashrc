@@ -9,6 +9,8 @@ shopt -s histappend
 export HISTSIZE=10000
 export HISTFILESIZE=20000
 export HISTTIMEFORMAT="%F %T "
+# Do not ignore duplicates.  This helps with alias / function / env var suggestions.
+export HISTCONTROL=''
 
 # Prompt
 __prompt_command(){
