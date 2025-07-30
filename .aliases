@@ -55,6 +55,7 @@ alias gp="git pull --prune"
 alias gfg="git fetch && git"
 alias gf="git fetch --prune"
 alias hg="history | grep"
+alias gm="git merge --no-edit"
 newname(){
 	local NUM=0
 	local FILE=$1
