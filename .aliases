@@ -45,7 +45,6 @@ rps(){
 	git rev-parse --short=4 $1
 }
 alias isgit="git rev-parse --is-inside-work-tree >& /dev/null"
-alias gfp="git fetch --prune"
 alias gdn="git diff --name-only "
 alias brn="git branch --show-current "
 alias gs="git status"
@@ -54,8 +53,9 @@ alias gl="git log --no-merges"
 alias gp="git pull --prune"
 alias gfg="git fetch && git"
 alias gf="git fetch --prune"
-alias hg="history | grep"
+alias mc='git diff --name-only --diff-filter=U'
 alias gm="git merge --no-edit"
+alias hg="history | grep"
 newname(){
 	local NUM=0
 	local FILE=$1
@@ -69,7 +69,6 @@ newname(){
 }
 alias xc="xclip -o"
 alias sp="for f in {1..5} ; do echo ; done"
-alias gdno="git diff --name-only "
 alias cdrp='cd `realpath $PWD`'
 alias mdps='ps -eo pid,ppid,pcpu,etime,user,cmd '
 alias ldir='ll | grep "^d"'
@@ -113,4 +112,3 @@ alias nows="sed -i 's/[[:space:]]\+$//' "
 alias latest='find -L . -type f -printf "%T@ %p\n" 2>/dev/null | sort -nr | head -n 30  | while read ts file; do echo "$(date -d @"$ts" "+%Y-%m-%d %H:%M:%S") $file"; done'
 alias tmn='tmux new-session -s '
 alias mylsof='sp; lsof 2>/dev/null | grep -E "(COMMAND|\(deleted\))";lsof 2>/dev/null|head -1'
-alias mc='git diff --name-only --diff-filter=U'
