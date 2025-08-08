@@ -45,7 +45,8 @@ rps(){
 	git rev-parse --short=4 $1
 }
 alias isgit="git rev-parse --is-inside-work-tree >& /dev/null"
-alias gdn="git diff --name-only "
+alias gd="git diff"
+alias gdn="gd --name-only "
 alias brn="git branch --show-current "
 alias gs="git status"
 alias gg="git grep"
