@@ -148,3 +148,5 @@ bar {
 }
 
 default_border normal 6
+
+bindsym $mod+v exec --no-startup-id ~/scripts/paste.sh
