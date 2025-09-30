@@ -1,0 +1,85 @@
+#!/bin/bash
+
+# rmfast - instead of waiting for rm, mv the directory and rm it in the background so it returns control quickly
+
+# Check if exactly one file/directory argument was provided
+if [ $# -ne 1 ]; then
+    echo "Usage: $0 <file_or_directory>"
+    echo "Provide exactly one file or directory name to check"
+    exit 1
+fi
+
+# Get the provided file/directory argument
+target_path="$1"
+
+# Check if the file or directory exists
+if [ ! -e "$target_path" ]; then
+    echo "Error: '$target_path' does not exist"
+    exit 1
+fi
+
+# Get the real path of the target (if it's a file, get its directory)
+if [ -f "$target_path" ]; then
+    # If it's a file, get the directory containing it
+    current_dir=$(realpath "$(dirname "$target_path")")
+    echo "Target file: $(realpath "$target_path")"
+    echo "Starting from directory: $current_dir"
+elif [ -d "$target_path" ]; then
+    # If it's a directory, use it directly
+    current_dir=$(realpath "$target_path")
+    echo "Target directory: $current_dir"
+else
+    echo "Error: '$target_path' is neither a regular file nor a directory"
+    exit 1
+fi
+
+# Start from current directory and traverse up
+check_dir="$current_dir"
+last_user_owned_dir=""
+
+while true; do
+    # Get the owner of the current directory being checked
+    dir_owner=$(stat -c '%U' "$check_dir" 2>/dev/null)
+    
+    # Check if we successfully got the owner and if it matches $USER
+    if [ $? -eq 0 ] && [ "$dir_owner" = "$USER" ]; then
+        last_user_owned_dir="$check_dir"
+    fi
+    
+    # Check if we've reached the root directory
+    if [ "$check_dir" = "/" ]; then
+        break
+    fi
+    
+    # Move up one directory level
+    check_dir=$(dirname "$check_dir")
+done
+
+# Report the result
+if [ -n "$last_user_owned_dir" ]; then
+    echo "Last directory owned by $USER: $last_user_owned_dir"
+    
+    # Create .rmfast directory if it doesn't exist
+    rmfast_dir="$last_user_owned_dir/.rmfast"
+    if [ ! -d "$rmfast_dir" ]; then
+        mkdir -p "$rmfast_dir"
+        echo "Created directory: $rmfast_dir"
+    fi
+    
+    # Note the realpath to the .rmfast directory
+    rmfast_realpath=$(realpath "$rmfast_dir")
+    echo "Realpath to .rmfast directory: $rmfast_realpath"
+    
+    # Move the target file or directory to the .rmfast directory
+    mv -v "$target_path" "$rmfast_dir/" || exit 1
+    
+    # Start background process to remove the moved item from .rmfast directory
+    target_name=$(basename "$target_path")
+    rm_cmd="rm -rf \"$rmfast_dir/$target_name\" >/dev/null 2>&1"
+    echo "($rm_cmd) &"
+    (eval "$rm_cmd") &
+    exit 0
+else
+    echo "No directory owned by $USER found in the hierarchy"
+    exit 1
+fi
