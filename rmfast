@@ -71,7 +71,7 @@ if [ -n "$last_user_owned_dir" ]; then
     echo "Realpath to .rmfast directory: $rmfast_realpath"
     
     # Move the target file or directory to the .rmfast directory
-    mv -v "$target_path" "$rmfast_dir/" || exit 1
+    mv "$target_path" "$rmfast_dir/" || exit 1
     
     # Start background process to remove the moved item from .rmfast directory
     target_name=$(basename "$target_path")
