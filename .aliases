@@ -113,6 +113,10 @@ alias nows="sed -i 's/[[:space:]]\+$//' "
 alias latest='find -L . -type f -printf "%T@ %p\n" 2>/dev/null | sort -nr | head -n 30  | while read ts file; do echo "$(date -d @"$ts" "+%Y-%m-%d %H:%M:%S") $file"; done'
 tmn(){
     local session_name="${1//./_}"
+    if [ -n "$VSCODE_IPC_HOOK_CLI" ]; then
+        echo "export VSCODE_IPC_HOOK_CLI=\"$VSCODE_IPC_HOOK_CLI\"" > /tmp/tmux.$session_name
+        chmod +x /tmp/tmux.$session_name
+    fi
     tmux new-session -s "$session_name"
 }
 alias mylsof='sp; lsof 2>/dev/null | grep -E "(COMMAND|\(deleted\))";lsof 2>/dev/null|head -1'
