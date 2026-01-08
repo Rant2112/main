@@ -17,4 +17,4 @@
 [commit]
 	verbose = true
 [merge]
-	conflictstyle = zdiff3
+	conflictstyle = diff3
