@@ -18,6 +18,7 @@ xt(){
     LABEL=$name xterm -T "$name" -n "$name" &
 }
 alias gr="git rev-parse --show-toplevel"
+alias grtmp='(cd "$(gr)" && mkdir -p tmp && touch tmp/README && cursor tmp/README)'
 alias h="history 20"
 alias l="less -i "
 mcd(){
