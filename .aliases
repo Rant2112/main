@@ -112,18 +112,35 @@ pstreefull(){
 alias nows="sed -i -e 's/\t/   /g' -e 's/[[:space:]]\+$//' "
 # -L follows links
 alias latest='find -L . -type f -printf "%T@ %p\n" 2>/dev/null | sort -nr | head -n 30  | while read ts file; do echo "$(date -d @"$ts" "+%Y-%m-%d %H:%M:%S") $file"; done'
-tm(){
-    local session_name="${1:-$(basename "$(gr)")}"
-    session_name="${session_name//./_}"
-    if tmux has-session -t "$session_name" 2>/dev/null; then
-        tmux attach -t "$session_name"
+_tm_try(){
+    local base="$1"
+    local n="$2"
+    local session_name
+    if [ "$n" -eq 0 ]; then
+        session_name="$base"
     else
+        session_name="${base}.$((n - 1))"
+    fi
+    if ! tmux has-session -t "$session_name" 2>/dev/null; then
         if [ -n "$VSCODE_IPC_HOOK_CLI" ]; then
             echo "export VSCODE_IPC_HOOK_CLI=\"$VSCODE_IPC_HOOK_CLI\"" > /tmp/tmux.$session_name
             chmod +x /tmp/tmux.$session_name
         fi
         tmux new-session -s "$session_name"
+        return
     fi
+    local clients
+    clients=$(tmux list-clients -t "$session_name" 2>/dev/null | wc -l)
+    if [ "${clients:-0}" -eq 0 ]; then
+        tmux attach -t "$session_name"
+        return
+    fi
+    _tm_try "$base" $((n + 1))
+}
+tm(){
+    local session_name="${1:-$(basename "$(gr)")}"
+    session_name="${session_name//./_}"
+    _tm_try "$session_name" 0
 }
 alias mylsof='sp; lsof 2>/dev/null | grep -E "(COMMAND|\(deleted\))";lsof 2>/dev/null|head -1'
 alias pause='read -n 1 -s -r'
