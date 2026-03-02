@@ -119,7 +119,7 @@ _tm_try(){
     if [ "$n" -eq 0 ]; then
         session_name="$base"
     else
-        session_name="${base}.$((n - 1))"
+        session_name="${base}_$((n - 1))"
     fi
     if ! tmux has-session -t "$session_name" 2>/dev/null; then
         if [ -n "$VSCODE_IPC_HOOK_CLI" ]; then
