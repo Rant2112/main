@@ -1,3 +1,6 @@
+[user]
+	name = Matt Day
+	email = rant@mattandrenee.net
 [branch]
 	sort = -committerdate
 [diff]
