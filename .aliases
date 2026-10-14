@@ -1,31 +1,51 @@
 # Personal
 
+# OS / shell detection, used by per-alias conditionals below
+[[ $OSTYPE == darwin* ]] && IS_MAC=1 || IS_MAC=
+[[ -n $ZSH_VERSION ]] && IS_ZSH=1 || IS_ZSH=
+
 #echo "personal aliases"
 
-vnckill(){
-    vncserver -kill :$1
-}
+if [[ -z $IS_MAC ]]; then
+    vnckill(){
+        vncserver -kill :$1
+    }
+fi
 alias g="git"
-alias ls="ls --color=auto"
+if [[ -n $IS_MAC ]]; then
+    alias ls="ls -G"
+else
+    alias ls="ls --color=auto"
+fi
 alias ll="ls -lha"
 alias lld="ls -lhad"
 alias llt="ls -lhatr"
 e(){
     emacs $@ &
 }
-xt(){
-    local name=${1:-xterm}
-    LABEL=$name xterm -T "$name" -n "$name" &
-}
+if [[ -z $IS_MAC ]]; then
+    xt(){
+        local name=${1:-xterm}
+        LABEL=$name xterm -T "$name" -n "$name" &
+    }
+fi
 alias gr="git rev-parse --show-toplevel"
 alias grtmp='(cd "$(gr)" && mkdir -p tmp && touch tmp/README && cursor tmp/README)'
-alias h="history 20"
+if [[ -n $IS_ZSH ]]; then
+    alias h="history -20"
+else
+    alias h="history 20"
+fi
 alias l="less -i "
 mcd(){
     mkdir -pv $1 && cd $1
 }
-alias clean="rm -fv {,.}{*~,#*#}"
-alias myxrdb="xrdb -cpp cpp -load ~/.Xresources"
+if [[ -n $IS_ZSH ]]; then
+    alias clean="rm -fv {,.}{*~,#*#}(N)"
+else
+    alias clean="rm -fv {,.}{*~,#*#}"
+fi
+[[ -z $IS_MAC ]] && alias myxrdb="xrdb -cpp cpp -load ~/.Xresources"
 alias j="jobs -l"
 wta(){
     git worktree add -b $1 $1 $2 && cd $1
@@ -57,7 +77,11 @@ alias gfg="git fetch && git"
 alias gf="git fetch --prune"
 alias mc='git diff --name-only --diff-filter=U'
 alias gm="git merge --no-edit"
-alias hg="history | grep"
+if [[ -n $IS_ZSH ]]; then
+    alias hg="history 1 | grep"
+else
+    alias hg="history | grep"
+fi
 newname(){
     local NUM=0
     local FILE=$1
@@ -69,10 +93,18 @@ newname(){
     fi
     echo $FILE
 }
-alias xc="xclip -o"
+if [[ -n $IS_MAC ]]; then
+    alias xc="pbpaste"
+else
+    alias xc="xclip -o"
+fi
 alias sp="for f in {1..5} ; do echo ; done"
 alias cdrp='cd `realpath $PWD`'
-alias mdps='ps -eo pid,ppid,pcpu,etime,user,cmd '
+if [[ -n $IS_MAC ]]; then
+    alias mdps='ps -eo pid,ppid,pcpu,etime,user,command '
+else
+    alias mdps='ps -eo pid,ppid,pcpu,etime,user,cmd '
+fi
 alias ldir='ll | grep "^d"'
 awkp(){
     pattern="$1"
@@ -94,24 +126,47 @@ awkp(){
                 print "==> " file " <=="
                 print $0 "\n"
             }
-        }' "$file"
+        }
+        END { exit !matched }' "$file" && matched=1
     done
     return $((matched == 1 ? 0 : 1))
 }
 
 alias wat="watch -n 60 "
-alias pstree="pstree -lpas "
+if [[ -n $IS_MAC ]]; then
+    # macOS (brew) pstree is a different program: -w wide, -p <pid> = branches containing pid
+    alias pstree="pstree -w -p "
+else
+    alias pstree="pstree -lpas "
+fi
 
 pstreefull(){
     mdps | head -1
-    for f in $(pstree $1 | cut -d ',' -f 2 | cut -d ' ' -f 1); do
-        mdps | grep "^\s*\b$f\b"
+    local pids
+    if [[ -n $IS_MAC ]]; then
+        # mac format: " \-+= 12345 user cmd"  -> first numeric field
+        pids=$(pstree $1 | awk '{for(i=1;i<=NF;i++) if($i ~ /^[0-9]+$/){print $i; break}}')
+    else
+        # linux format: "name,12345 args"
+        pids=$(pstree $1 | cut -d ',' -f 2 | cut -d ' ' -f 1)
+    fi
+    for f in $pids; do
+        mdps | grep -E "^ *$f "
     done
 }
 
-alias nows="sed -i -e 's/\t/   /g' -e 's/[[:space:]]\+$//' "
+if [[ -n $IS_MAC ]]; then
+    # BSD sed: needs -i '', no \t or \+ in regex
+    nows(){ sed -i '' -E -e $'s/\t/   /g' -e 's/[[:space:]]+$//' "$@"; }
+else
+    alias nows="sed -i -e 's/\t/   /g' -e 's/[[:space:]]\+$//' "
+fi
 # -L follows links
-alias latest='find -L . -type f -printf "%T@ %p\n" 2>/dev/null | sort -nr | head -n 30  | while read ts file; do echo "$(date -d @"$ts" "+%Y-%m-%d %H:%M:%S") $file"; done'
+if [[ -n $IS_MAC ]]; then
+    alias latest='find -L . -type f -exec stat -f "%m %N" {} + 2>/dev/null | sort -nr | head -n 30 | while read ts file; do echo "$(date -r "$ts" "+%Y-%m-%d %H:%M:%S") $file"; done'
+else
+    alias latest='find -L . -type f -printf "%T@ %p\n" 2>/dev/null | sort -nr | head -n 30  | while read ts file; do echo "$(date -d @"$ts" "+%Y-%m-%d %H:%M:%S") $file"; done'
+fi
 _tm_try(){
     local base="$1"
     local n="$2"
@@ -143,4 +198,8 @@ tm(){
     _tm_try "$session_name" 0
 }
 alias mylsof='sp; lsof 2>/dev/null | grep -E "(COMMAND|\(deleted\))";lsof 2>/dev/null|head -1'
-alias pause='read -n 1 -s -r'
+if [[ -n $IS_ZSH ]]; then
+    alias pause='read -k 1 -s'
+else
+    alias pause='read -n 1 -s -r'
+fi
